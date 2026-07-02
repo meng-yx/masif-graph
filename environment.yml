@@ -1,0 +1,35 @@
+# Conda environment for the NEW MaSIF-graph code (analysis, per-atom mapping,
+# pooling, metrics, global alignment). CPU-oriented for now; GPU wheels swapped in later.
+#
+# NOTE: reference preprocessing (MSMS/APBS/PyMesh/TF1.13) is NOT in this env — it lives
+# with the reference `../masif-neosurf-af2` environment and is invoked as a tool.
+name: masif-graph
+channels:
+  - conda-forge
+dependencies:
+  - python=3.10
+  - pip
+  # scientific core
+  - numpy
+  - scipy
+  - scikit-learn
+  - pandas
+  - networkx
+  # structure / chem / geometry
+  - biopython
+  - rdkit
+  - open3d
+  # io / meshes
+  - trimesh
+  - plyfile
+  # notebooks / viz
+  - jupyterlab
+  - matplotlib
+  - seaborn
+  - tqdm
+  - pyyaml
+  - pip:
+      # ML stack — CPU wheels for now (swap to CUDA build once GPU access is set up)
+      - torch
+      - torch-geometric
+      - e3nn

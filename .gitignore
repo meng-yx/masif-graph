@@ -1,0 +1,53 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.ipynb_checkpoints/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Environments
+.venv/
+venv/
+env/
+*.conda
+
+# Data & model artifacts (keep only the reused lists under data/lists/)
+data/**
+!data/lists/
+!data/lists/**
+*.ply
+*.npy
+*.npz
+*.pdb
+*.mol2
+*.pqr
+*.dx
+models/
+checkpoints/
+*.hdf5
+*.ckpt
+*.pt
+
+# Preprocessing scratch
+tmp/
+scratch/
+*.vert
+*.face
+*.area
+*.xyzrn
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+*.swp
+
+# Logs
+*.log
+logs/
+wandb/

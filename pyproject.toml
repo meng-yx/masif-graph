@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "masif-graph"
+version = "0.0.1"
+description = "Atom-graph-enhanced surface fingerprints for protein-protein / neosurface search"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "Apache-2.0" }
+
+# Runtime deps are managed via environment.yml (conda + pip). This project block
+# exists so `pip install -e .` wires up the `masif_graph` package for imports.
+dependencies = []
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
