@@ -23,9 +23,11 @@ tests/
 ```
 
 ## Environments
-Two conda environments (the reference TF1 stack and the new PyTorch stack conflict):
-- **`masif-graph`** (this repo, `environment.yml`) — new code: Python 3.10 + PyTorch/PyG/e3nn + RDKit/Open3D/BioPython. CPU wheels for now.
-- **`masif-neosurf-ref`** — the reference `../masif-neosurf-af2` environment, used only to preprocess PDBs and compute reference descriptors for the Phase-1 probe.
+- **`masif-graph`** (this repo, `environment.yml`) — the one conda env for all new code:
+  Python 3.10 + PyTorch/PyG/e3nn + RDKit/Open3D/BioPython. CPU wheels for now.
+- The reference TF1 stack has **no conda env** — it runs entirely from the Singularity image
+  `masif-neosurf-af2/masif-neosurf_v0.1.sif`, used only to preprocess PDBs and compute
+  reference descriptors for the Phase-1 probe.
 
 ```bash
 conda env create -f environment.yml

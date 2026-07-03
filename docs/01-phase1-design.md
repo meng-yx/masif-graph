@@ -143,12 +143,12 @@ Phase 1 touches `io/`, `surface/`, `pairs/`, `align/`, `metrics/`, `experiments/
 
 ## 8. Environment & dependencies
 
-Two conda environments, because the reference stack and the new stack conflict (TF1.13/py3.6 vs modern PyTorch/py3.10):
+The reference stack and the new stack are kept fully separate (TF1.13/py3.7 vs modern PyTorch/py3.10):
 
-1. **`masif-neosurf-ref`** — the reference `masif-neosurf-af2` environment (Docker/py37 recipe already in that repo), used only to run Milestone 0 (preprocessing + descriptors). We do not recreate it here; we invoke the existing reference tooling.
-2. **`masif-graph`** — the new env (`environment.yml` in this repo): Python 3.10, numpy/scipy/scikit-learn/pandas/matplotlib/jupyter, biopython, RDKit, Open3D, networkx; PyTorch (CPU wheels for now), PyG, e3nn via pip. All Phase-1 *new* code (mapping, pooling, metrics, alignment) runs here on CPU.
+1. **Reference stack — Singularity image only, no conda env.** The reference `masif-neosurf-af2` tooling runs entirely inside `masif-neosurf-af2/masif-neosurf_v0.1.sif`, used only to run Milestone 0 (preprocessing + descriptors). We do not recreate it; we invoke the existing container.
+2. **`masif-graph`** — the new conda env (`environment.yml` in this repo): Python 3.10, numpy/scipy/scikit-learn/pandas/matplotlib/jupyter, biopython, RDKit, Open3D, networkx; PyTorch (CPU wheels for now), PyG, e3nn via pip. All Phase-1 *new* code (mapping, pooling, metrics, alignment) runs here on CPU.
 
-Native preprocessing tools (MSMS, APBS, PDB2PQR, reduce, PyMesh) live with the reference env; the new env does **not** need them for the probe (it consumes the reference's `.ply` + descriptor `.npy`).
+Native preprocessing tools (MSMS, APBS, PDB2PQR, reduce, PyMesh) live inside the reference `.sif`; the new env does **not** need them for the probe (it consumes the reference's `.ply` + descriptor `.npy`).
 
 ---
 
