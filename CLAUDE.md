@@ -8,28 +8,41 @@ MaSIF-graph: atom-graph-enhanced surface fingerprints for protein–protein / ne
 search. A ground-up **rewrite** of MaSIF-PPI-search whose fundamental unit is the **surface
 heavy atom**, not the mesh vertex. It is *not* a fork of the reference code.
 
-**Status: early design / Phase 1 — the code is essentially a stub.** The only Python that
-exists is `src/masif_graph/__init__.py`; the `io/ surface/ pairs/ align/ metrics/
-experiments/` modules, `scripts/`, and `tests/` described in the docs are **planned, not yet
-written**. Expect to create them. Design is far ahead of code.
+## Central goal (north star) — close the holo→apo gap
+MaSIF's learned surface descriptor is implicitly tuned to **bound-state (holo, crystal)
+sidechain rotamers** and degrades on **apo / AF2 / unbound** conformations (false positives &
+negatives) **despite a high holo-benchmark AUC**. The atom graph exists chiefly to encode
+**connectivity and bond rotatability** (how sidechain atoms can move), so the representation is
+**robust to sidechain conformation**. **Improving holo→apo generalization is the project's
+success criterion.** Consequence to keep in mind: the current holo-only validation set cannot,
+by itself, demonstrate this benefit — evaluation must include apo-like structures (Phase 2 uses
+fixed-backbone sidechain repack as the controlled proxy; see `docs/03-phase2-design.md`).
+
+**Status: Phase 1 complete (CONDITIONAL GO); Phase 2 in design.** Phase-1 code exists under
+`src/masif_graph/{io,surface,pairs,metrics,align,experiments}` (+ `scripts/`, `logs/m1`,
+`logs/m2`, `docs/figures/`); Phase-2 modules (`graph/ perturb/ train/ score/`) are planned, not
+yet written. Design still runs ahead of code — read the docs before building.
 
 ## Read before writing code
 - `docs/00-context-and-goals.md` — north star: hypothesis, key design decisions **D1–D10**,
   phasing, evaluation, risks. The D-decisions are the load-bearing forks.
-- `docs/01-phase1-design.md` — current work: per-atom reframing + the go/no-go **pooling
-  feasibility probe** (Milestones 0–2), and the proposed `src/masif_graph/` module layout.
+- `docs/01-phase1-design.md` + `docs/02-phase1-results.md` — Phase 1 (done): the pooling probe
+  and its CONDITIONAL GO (mean pooling; ~0.03–0.05 holo pooling cost).
+- `docs/03-phase2-design.md` — **current work:** holo→apo robustness via a heterogeneous atom
+  graph (connectivity + bond rotatability); the re-targeted gate and the fixed-backbone repack.
 - `README.md` — human-facing overview and repo layout.
 
 When a task touches modelling choices, check the docs first; if you diverge from a
-D-decision, say so explicitly. Phase 1 provisionally locks D1/D4/D8/D10 (see
-`01-phase1-design.md §1`); D2/D3/D5/D6/D7/D9 stay open.
+D-decision, say so explicitly. Phase 2 locks D6(freeze)/D3-A/D2/D4 provisionally (see
+`03-phase2-design.md §2`); D1-B is the escalation if the graph can't close the gap.
 
-## The Phase-1 gate (what the current work is actually deciding)
-Does a **per-atom pooled** fingerprint separate true contacting atom pairs from decoys as
-well as the **per-vertex** baseline? Greenlight if per-atom descriptor-separation ROC-AUC is
-within ~0.02 of per-vertex (baseline ≈0.98). Do **not** build Phases 2–4 (graph embeddings,
-retraining, aligner hardening, ligands) until this gate is met. A small Phase-1 drop is not
-failure — the intended gain is Phase 2.
+## The Phase-2 gate (what the current work is deciding)
+Does a graph encoding **atom connectivity + bond rotatability**, fused with the frozen surface
+descriptor, make the representation **robust to sidechain conformation** — i.e. degrade less
+under an apo-like fixed-backbone sidechain repack than surface-only — **without harming holo
+performance**? Holo AUC is a do-no-harm floor, *not* the objective. Do **not** build Phase 3+
+(learned pose scorer, aligner hardening, ligands, true apo/AF2 training) until this gate is met.
+The graph showing ~zero gain on **holo** is expected — the benefit lives in the apo-like regime.
 
 ## Commands
 ```bash
