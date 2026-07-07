@@ -8,7 +8,10 @@ description: >-
   run Claude headless via sbatch, or keep an agent working while they are away. Covers the
   verified environment facts, the de-risking smoke test, the supervisor-loop pattern that
   survives crashes/rate-limits, the worker-vs-conductor choice (a conductor agent submits &
-  monitors child training/GPU jobs against a spend budget), and the handoff-document pattern.
+  monitors child training/GPU jobs against a spend budget), the handoff-document pattern, how to
+  work autonomously toward a long-horizon goal (research/clone/pip-install/experiment/decide by
+  yourself within the user's boundaries, don't stop until the goal is reached or options are
+  exhausted), and the live-document + async `### USER:`/`### AGENT:` steering-comment convention.
 ---
 
 # Spinning up an autonomous Claude agent on SLURM (Jed)
@@ -131,6 +134,77 @@ gets summarized over many hours. Write a `HANDOFF.md` (template: `PHASE1_HANDOFF
   **append-only progress log** (`docs/progress/*.md`) it re-reads on every resume.
 - A **self-verification checklist** and honest **HALT conditions** (invoke
   `ml-research-guardrails` for any ML work).
+
+## Operating autonomously toward the goal (don't stop until it's reached or exhausted)
+You own a **standing goal**, not a task list. Within the user's stated **boundaries** — a
+**spend ceiling**, **where data/envs/weights live**, and any **locked decisions** — you do
+*everything yourself* and decide as you go. Nobody hands you the next step.
+- **Research first.** Read the repo, the papers, and — since Jed has internet — **web-search**,
+  **`git clone`** candidate tools, and **read their source** to learn the real API before using
+  it. (Phase 3: cloned AtomSurf and read its graph code before deciding to reuse only its surface
+  encoder and write our own chemistry graph.)
+- **Build the environment.** `conda create` / `pip install` whatever you need (on Jed — internet).
+  When two tools need **incompatible envs**, decouple: precompute in env A → save **cross-version-
+  safe artifacts** (e.g. `.npz`, byte-string keys) → consume in env B. (Phase 3: chem graph needs
+  biotite/py3.11, GPU training needs py3.8 — precompute graphs to `.npz`, join at train time.)
+- **De-risk before scaling.** Smoke every new tool on ONE example; validate a pipeline end-to-end
+  on a tiny "wave" of a few items; **read the actual output** before committing hours of compute.
+  A crash is cheap; a confident wrong result is expensive.
+- **Experiment and iterate.** Measure → hypothesize → sweep/ablate. When something fails,
+  **diagnose it** (read logs, reproduce, fix) and continue. When a result looks good, **try to
+  break it** (more seeds, held-out eval, shuffled controls ~0.5) *before* believing it — invoke
+  `ml-research-guardrails` throughout. Report absolute metrics, per-item spread, both
+  filtered+unfiltered numbers; state "pipeline ran" separately from "result is valid".
+- **Decide and proceed** on everything not explicitly reserved — modeling choices, subset
+  selection, which lever to try next. Record the reasoning in the log; **do not stop to ask**
+  unless you hit a real boundary.
+- **Persistence is the load-bearing rule.** Keep going until the **goal is reached** (deliverable
+  produced + self-verified) **or you have exhausted every option inside the boundaries**. A
+  **negative result, honestly verified, is a valid finish** (like Phase 2's NO-GO). If permanently
+  blocked, write the blocker + a provisional recommendation, *then* touch the sentinel. **Never
+  stop just because you finished a sub-step or "addressed a comment"** — pick up the next step.
+
+Long unattended runs WILL hit these; stay autonomous through them:
+- **A batch stalls on one slow task** (a lone MSA/inference straggler blocking a drain-wait) → run
+  a **watchdog** that `scancel`s tasks over a sane elapsed limit, or cancel it yourself next check.
+- **A race in your own orchestrator** (checking `squeue` too soon after `sbatch` → empty → you
+  proceed on incomplete data) → **verify data completeness before trusting a stage**; if wrong,
+  kill it, re-run the stage **idempotently**, and only then continue.
+- **Cross-cluster / cross-env friction** → internet work on Jed, stage to shared `/work`, decouple
+  envs via saved artifacts.
+- **Context gets summarized / the process restarts** → your append-only log is your memory. Keep a
+  **RESUME STATE** block in it (running job-ids, markers to check, exact next commands) so any
+  restart reattaches **without double-submitting**.
+
+## The live documents + async steering (write these, in this layout)
+Maintain a small set of **living documents** so the user can watch you think and **steer without
+interrupting you**, and so a summarized/restarted context recovers. Naming convention (Phase 3 as
+example): **docs get a 2-digit index in the order they are generated under `docs/`**; the running
+log lives in `docs/progress/`; the brief is top-level.
+
+| file | role |
+|---|---|
+| `PHASE3_HANDOFF.md` | the self-contained brief the user writes for you (autonomy contract, definition of done, boundaries/budget, locked decisions, read-first pointers). You *read* it. |
+| `docs/progress/phase3-log.md` | **real-time running log** ("watch me think"). Append a `## <n>. <title>` header the moment you start a step, then reasoning/decisions/commands as you go — *before and during*, not only after. Log **cumulative spend** and **every child job-id** here. It is your memory across restarts. |
+| `docs/05-phase3-design.md` | evolving design/plan: hypotheses, chosen approach, and *why* (state any divergence from a locked decision explicitly). |
+| `docs/06-phase3-user-comment.md` | **async steering channel** (protocol below). |
+| `docs/07-phase3-results.md` | results, tables, honest verdicts + a concrete recommendation. Every number traces to a committed artifact + a recoverable command. |
+
+Continue the index from the last number already used under `docs/` (Phase 1–2 used `00`–`04`, so
+Phase 3 is `05`–`07`); keep the log beside `docs/progress/phase1-log.md` / `phase2-log.md`.
+
+### The async-comment protocol (how a user steers a headless run)
+Initialize `docs/06-phase{N}-user-comment.md` near-empty and **mirror each running-log step header**
+into it. The user may add a comment beginning `### 🧑 USER:` under any header at any time. You:
+- **Re-read this file at every step boundary** (and periodically during long waits).
+- For any **new** `### 🧑 USER:` comment, reply inline under it with `### 🤖 AGENT:` — acknowledge,
+  say concretely how you'll act (or, with evidence, why you'll adapt it), then **do it and keep
+  going**. Never edit the user's lines. A comment is steering, **not** a stop signal. (Phase 3
+  examples: switching to interface-local superposition; adding a structural-mismatch detector with
+  1A2W as a positive control — both arrived mid-run and were folded in without pausing.)
+- Post a **spend checkpoint** here when a planned action would cross a budget gate the user
+  reserved: write results-so-far + the ask + a cost projection under a clear header, and wait for
+  their go. **This is the only routine reason to pause.**
 
 ## Monitoring / handing back
 - `squeue -j <id>`, `tail -f logs/<job>-%j.out`, and the agent's progress log.
