@@ -54,3 +54,5 @@ wandb/
 
 # legacy repo for reference, can be removed once the new repo is fully functional
 masif-neosurf-af2/
+
+viz_positives/

@@ -229,9 +229,22 @@ directive).** Graph-vs-no-graph ablation at reg=0.05 + the data scale-up are in 
 4. **Ceiling stands:** M3 recovers only ~20% of the +0.08 gap; absolute AF3→holo 0.817 ≪ 0.90 holo ceiling.
    The frozen descriptor is remarkably strong; unfreezing buys a small, robust, but not gap-closing gain.
 
-**RECOMMENDATION.** The deployment-ready levers remain: (a) accept the modest +0.016 from a learnable
-encoder if the retraining cost is justified; (b) the training-free **ensemble soft-min** (M2, lossless
-+0.020 gap-to-ceiling reduction) is comparable for far less effort; (c) the biggest wins are *upstream* —
-filter structural-mismatch AF3 models (23%, non-binders) and use multi-seed/pLDDT confidence. A materially
-gap-closing descriptor would need a fundamentally stronger objective/architecture than tested here, not just
-more data. **Cumulative CHF ≈ 7 of 100.**
+**RECOMMENDATION.** Distinguish **deployment-time (query-only, no holo)** levers from **training/analysis**
+levers — a query at deployment is an AF3 monomer with *no* holo complex, so anything needing the holo
+structure cannot run on it:
+- **Deployment-time (query-only) levers:** (a) accept the modest +0.016 from a learnable encoder if the
+  retraining cost is justified; (b) the training-free **ensemble soft-min** over AF3 diffusion samples (M2,
+  lossless +0.020 gap-to-ceiling reduction) — comparable for far less effort; (c) **pLDDT / confidence
+  weighting** (ships inside the AF3 model). These are the only levers that touch the deployment query.
+- **NOT a deployment lever — training-data hygiene + honest reporting only:** the **structural-mismatch
+  filter** (retention < 0.5 OR interface-local Cα-RMSD > 4 Å). *Both thresholds require the holo complex*
+  (retention needs the holo interface-atom set; RMSD needs the holo interface to superpose onto), so it
+  **cannot screen the deployment query.** Its legitimate uses: (i) partitioning the measured gap into
+  addressable induced-fit (+0.069) vs unaddressable structural-mismatch (~23%) for honest reporting, and
+  (ii) excluding mismatch complexes from *training positives* (done in M3). There is **no full query-side
+  substitute**: the 1A2W-type cases are ones AF3 folds *confidently* into a non-binding conformation
+  (self-consistent across samples), so they are query-indistinguishable from correct folds without the
+  partner — an intrinsic ceiling. Those proteins surface as search misses; no pre-screen rescues them.
+
+A materially gap-closing descriptor would need a fundamentally stronger objective/architecture than tested
+here, not just more data. **Cumulative CHF ≈ 7 of 100.**

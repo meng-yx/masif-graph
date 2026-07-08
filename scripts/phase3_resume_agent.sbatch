@@ -56,17 +56,17 @@ user APPROVED M3 with a HARD budget of CHF $M3_BUDGET for ALL remaining work com
 pilot, full-scale training, generation, everything). Work FULLY autonomously within it — do NOT stop \
 to ask for intermediate steps: if the pilot works, go straight on to full training, as long as your \
 projected CUMULATIVE spend stays within CHF $M3_BUDGET. ONLY if projected cumulative spend would \
-EXCEED CHF $M3_BUDGET must you STOP, post a checkpoint in docs/06-06-phase3-user-comment.md, and wait. \
+EXCEED CHF $M3_BUDGET must you STOP, post a checkpoint in docs/06-phase3-user-comment.md, and wait. \
 Track cumulative CHF carefully (you spent ~CHF 3 in M0-M2; Kuma sbatch prints a per-job estimate). \
 Continue maintaining your four live \
 docs (progress/phase3-log.md real-time, 05-phase3-design.md, 07-phase3-results.md, 06-phase3-user-comment.md) and \
-re-read docs/06-06-phase3-user-comment.md at every step boundary, replying under any new '### USER:' with \
+re-read docs/06-phase3-user-comment.md at every step boundary, replying under any new '### USER:' with \
 '### AGENT:'. Follow ml-research-guardrails (shuffled ~0.5; complex-level holdout; ABSOLUTE AF3 \
 metrics; the structural-mismatch/1A2W handling the user asked for; never fabricate). Log cumulative \
 CHF and every Kuma job-id. When the pilot is complete AND self-verified, or you are permanently \
 blocked (write blocker+recommendation first), touch $SENTINEL"
 
-RESUME_FLW="Resume M3. Re-read docs/progress/phase3-log.md tail + docs/06-06-phase3-user-comment.md for any new \
+RESUME_FLW="Resume M3. Re-read docs/progress/phase3-log.md tail + docs/06-phase3-user-comment.md for any new \
 '### USER:' comment (reply '### AGENT:'), run 'ssh ... kuma squeue -u ymeng' and reattach to any \
 running jobs (do NOT double-submit). Continue autonomously within the CHF $M3_BUDGET total budget for \
 all remaining work; do NOT stop for intermediate steps — only checkpoint if projected CUMULATIVE \

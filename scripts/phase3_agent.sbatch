@@ -15,7 +15,7 @@
 # Runs CPU work on Jed AND ssh-submits/monitors GPU jobs on Kuma. Staged budget
 # CHF 100 / ~48h for arc M0-M2; MUST checkpoint before M3 large spend.
 # Brief: PHASE3_HANDOFF.md. Live docs: docs/progress/phase3-log.md + docs/{05-phase3-design,07-phase3-results}.md +
-# docs/06-06-phase3-user-comment.md (async user steering).
+# docs/06-phase3-user-comment.md (async user steering).
 # Supervisor loop resumes it across crashes/rate-limits until the sentinel.
 # ============================================================================
 
@@ -62,22 +62,22 @@ mission per the handoff: M0 infra smoke -> M1 measure the real holo->AF3 gap on 
 shuffled controls, complex-level holdout, absolute metrics) -> M2 first robustness hypothesis \
 (AtomSurf/ensemble/flex-weighted). You DECIDE and proceed without asking permission. Maintain the \
 four live docs: docs/progress/phase3-log.md (real-time reasoning, a '## <n>. <title>' header per step, \
-written as you go), docs/05-05-phase3-design.md, docs/07-07-phase3-results.md, and docs/06-06-phase3-user-comment.md \
+written as you go), docs/05-phase3-design.md, docs/07-phase3-results.md, and docs/06-phase3-user-comment.md \
 (init near-empty; mirror each work-step header; at EVERY step boundary re-read it and reply under any \
 new '### USER:' comment with '### AGENT:'). Follow ml-research-guardrails. Log cumulative CHF and \
 every Kuma job-id in progress/phase3-log.md. Budget contract: CHF 100 / ~48h for M0-M2; BEFORE any large \
 spend (M3: full-dataset retrain / large-scale AF3 generation) STOP, write a checkpoint + cost ask in \
-docs/06-06-phase3-user-comment.md, and wait. When the M0-M2 arc is complete and self-verified (or you are \
+docs/06-phase3-user-comment.md, and wait. When the M0-M2 arc is complete and self-verified (or you are \
 permanently blocked, in which case write the blocker + provisional recommendation), touch $SENTINEL"
 
 RESUME="Resume autonomous Phase-3 development. First re-read docs/progress/phase3-log.md (and \
 PHASE3_HANDOFF.md if needed) to recover context, cumulative CHF spend, and any Kuma job-ids you \
 already submitted — run 'ssh ... kuma squeue -u ymeng' and reattach; DO NOT double-submit or redo \
-finished work. Re-read docs/06-06-phase3-user-comment.md and respond to any new '### USER:' comment before \
+finished work. Re-read docs/06-phase3-user-comment.md and respond to any new '### USER:' comment before \
 continuing. Keep following ml-research-guardrails (shuffled control ~0.5; complex-level holdout, no \
 holo/AF3 leakage; report ABSOLUTE apo/AF3 metrics not just differentials; never fabricate; stay under \
 the CHF 100 staged budget and checkpoint before any large M3 spend). Continue toward the M0-M2 \
-deliverable in docs/07-07-phase3-results.md. When complete AND self-verified, or permanently blocked (write \
+deliverable in docs/07-phase3-results.md. When complete AND self-verified, or permanently blocked (write \
 progress+blocker+provisional recommendation), touch $SENTINEL."
 
 iter=0
@@ -123,4 +123,4 @@ done
 
 echo "[SUP] $(date '+%F %T') conductor exiting after $iter iteration(s)."
 [ -f "$SENTINEL" ] && echo "[SUP] RESULT: sentinel set." || echo "[SUP] RESULT: no sentinel (deadline/giveup)."
-[ -f "$REPO/docs/07-07-phase3-results.md" ] && echo "[SUP] deliverable docs/07-07-phase3-results.md EXISTS." || echo "[SUP] deliverable MISSING."
+[ -f "$REPO/docs/07-phase3-results.md" ] && echo "[SUP] deliverable docs/07-phase3-results.md EXISTS." || echo "[SUP] deliverable MISSING."
