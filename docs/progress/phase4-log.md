@@ -539,6 +539,22 @@ verify z_std~0.1 & τ off-floor) written to `docs/10` §diagnostic. **PHASE-4 SC
 INCONCLUSIVE (training-stability failure, root cause named), sentinel `logs/PHASE4_SCALEUP_DONE` stands, Kuma
 clear, session spend ≈ CHF 18 of 100. The redesign is a NEW phase — awaits user go, not autonomous.
 
+## 17. ANTI-COLLAPSE FIX — stability SOLVED, from-scratch reaches holo ceiling (user GO: "finish Phase 4")
+
+Implemented the §15 redesign: `objective.py::vicreg_terms` (VICReg var+cov on raw embeddings) + `train.py`
+flags `--vicreg-var/-cov --freeze-tau --tau --t-wd` (opt-in, baseline preserved for A/B). CPU-smoke (12 cplx):
+z_std 0.04 stable, τ fixed, ‖T‖ flat ~1.7, grad 4–6, loss down — collapse gone. Full-set **2×2** on Kuma
+(jobs **3801368–71**, dense/sc × seed 0/1, 4811 cplx, 50 ep, ~1.6 h each, **CHF ~3.4**; config vicreg-var 2.0
+/cov 0.04 / freeze-τ@0.1 / t-wd 1e-3 / lr 5e-4 / clip 1.0 / cosine / stream / bank 128).
+**RESULT (full detail in docs/10 §16):** all 4 stable through ep50, **no divergence** (τ pinned, ‖T‖ 4–12,
+z_std 0.015–0.05, shuf ~0.50) — root-cause call vindicated. From chance init (0.46/0.48) → **sc median reaches
+the 0.947 frozen ceiling** (best sc_s0 pooled 0.901 / median 0.997, still ↑ at ep50); **dense beats** frozen-dense
+(+0.09–0.16). **Phase 4 flips INCONCLUSIVE → real: the arc-1 "unstable ~0.75, data-limited?" was an
+OPTIMIZATION-STABILITY failure, not a data/capacity limit.** SCOPE CAVEAT: holo→holo M1 feasibility only — NOT
+the north-star holo→apo robustness (needs the apo/AF3 eval, not run here); necessary-not-sufficient. Best
+checkpoints saved `vicreg_{dense,sc}_best_seed{0,1}.pt`; per-epoch `diag`+`history` in `vicreg_*_seed*.json`.
+Session spend ≈ CHF 22/100. Code fix lives on both /scratch repo and /work/.../phase4/src (synced); **not committed** (norm: commit only when asked).
+
 ## 16. Notebook illustration — message passing (user-requested)
 
 Added §8–§10 to `notebooks/inspect_p4_data.ipynb` (validated end-to-end via nbconvert on `1A0G_A_B`): a

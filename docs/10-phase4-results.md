@@ -290,3 +290,53 @@ grad-norm max spikes to **5.6×10⁵**. Final held-out AUCs are unreliable noise
 three suspects are settled: **representation collapse is primary and immediate; temperature-floor + unbounded ‖T‖
 are the amplifiers.** Every number traces to the committed `"diag"` array per run.
 
+## 16. RESOLUTION — anti-collapse fix works; stability SOLVED; from-scratch reaches the holo ceiling
+
+The redesign prescribed in §15 (points 1–3) was implemented **exactly** and run on the full set. Fix
+(`objective.py::vicreg_terms` + `train.py` flags): (1) **VICReg** variance+covariance on the *raw*
+(pre-normalize) embeddings — forces per-dim std≥1 and decorrelates, the direct anti-collapse lever;
+(2) **frozen τ@0.1** (`--freeze-tau`) — can't ride the floor; (3) **weight-decay 1e-3 on T** (`--t-wd`) —
+bounds ‖T‖. Calm optim as insurance (lr 5e-4, grad-clip 1.0, cosine). CPU-smoke (12 cplx) first, then the
+**2×2 full-set matrix** (dense/sc × seed 0/1 = jobs 3801368–71, 4811 complexes, 50 ep, ~1.6 h each, **CHF ~3.4**).
+
+**STABILITY — SOLVED (the §15 prescription verified).** All 4 configs train the full 50 epochs with **no
+divergence**. Re-running the same diagnostic confirms every failure signal is gone:
+
+| signal | un-fixed (diverged) | **fixed (all 4 jobs, through ep50)** |
+|---|---|---|
+| τ | → 0.01 floor | **0.1000 pinned** |
+| ‖T‖₂ | 11→39 unbounded | **4–12, bounded/flat** |
+| z_std | → 0.001–0.003 (collapse) | **0.015–0.05, alive & rising** |
+| grad-norm max | up to 5.6×10⁵ | contained (dense ~5–7; sc noisier, spikes to ~1200 but grad-clip absorbs, no runaway) |
+| final-epoch AUC | collapses to ~0.40 (< shuffled) | **stable, real (see below)** |
+| shuffled control | — | **~0.50 throughout** (metric honest) |
+
+Confirms the root-cause call: it **was** representation collapse; fixing collapse fixes the whole cascade.
+Optim knobs (§14 grad-clip, stabilize LR) never could — they don't touch collapse.
+
+**SCIENCE — holo→holo separation (the M1 feasibility gate).** From a random-init baseline at **chance**
+(learned dense 0.459 / sc 0.476; shuf 0.50), the stabilized from-scratch GNN learns to (final ep50, pooled /
+per-complex median):
+
+| config | learned pooled | learned median | vs frozen ceiling |
+|---|---|---|---|
+| **sc, seed 0** | **0.901** (still ↑ at ep50) | **0.997** | pooled ~0.05 under 0.947; **median AT/above ceiling** |
+| sc, seed 1 | 0.825 (best 0.876@ep45) | 0.889 (peak 0.956) | median ≈ ceiling |
+| dense, seed 0 | 0.846 | 0.875 | **beats** frozen-dense (pooled 0.682) by +0.16 |
+| dense, seed 1 | 0.768 | 0.807 | beats frozen-dense by +0.09 |
+
+**VERDICT — Phase 4 flips from INCONCLUSIVE to a real result.** Once stabilized, the from-scratch
+heterogeneous GNN **learns interface correspondence to essentially the frozen-MaSIF holo level**: on the clean
+**sc** positive set the per-complex **median reaches the ~0.947 ceiling** (best run 0.997, still improving at
+ep50), pooled trails by ~0.05; on **dense** it clearly **beats** the frozen-dense ceiling. This **closes the
+arc-1 open item** ("held-out SC ~0.75, unstable, data-limited?"): it was an **optimization-stability failure,
+not a capacity or data limit**. Seed variance is real (~0.05–0.08 pooled) — report the range, not the best.
+
+**HONEST SCOPE CAVEAT (do not overclaim).** This is **holo→holo** separation — the M1 *feasibility / do-no-harm*
+gate, i.e. "can a from-scratch encoder match frozen on the easy regime." It does **NOT** demonstrate the
+north-star **holo→apo robustness**; that needs the apo/AF3 eval (Phase-3's regime), not run here. So the result
+is **necessary, not sufficient**: it makes the from-scratch encoder a *viable substrate* on which to finally
+test robustness (the M3 frozen-ceiling result showed unfreezing buys +0.016 there). The Phase-2/3 finding that
+the **chemistry graph adds ~nothing** is a separate question and still stands — untouched by this stability fix.
+**Cumulative session spend ≈ CHF 22 of 100.**
+

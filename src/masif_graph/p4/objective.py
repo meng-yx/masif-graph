@@ -38,6 +38,30 @@ def normalize(z: torch.Tensor) -> torch.Tensor:
     return F.normalize(z, dim=1, eps=1e-8)
 
 
+def vicreg_terms(z: torch.Tensor, gamma: float = 1.0, eps: float = 1e-4):
+    """VICReg variance + covariance collapse-prevention on the RAW (pre-normalize) embeddings z (n,d).
+
+    The diagnostic (docs/10) proved InfoNCE-on-normalized-embeddings collapses despite the docstring
+    claim: L2-normalization bounds each vector's norm but NOT the diversity across atoms, so every z_i
+    drifted to the same point on the sphere (z_std->0), stalling InfoNCE at log(N) and forcing the
+    bilinear T / temperature to run away. VICReg attacks the cause directly:
+      - variance term: hinge(gamma - std_per_dim) -> forces each dim's std >= gamma (spreads the point cloud);
+      - covariance term: off-diagonal Cov^2 -> decorrelates dims (prevents informational/subspace collapse).
+    Returns (var_term, cov_term); apply to the raw output of each chain, then normalize() for scoring.
+    """
+    n, d = z.shape
+    if n < 2:
+        z0 = z.new_zeros(())
+        return z0, z0
+    zc = z - z.mean(0, keepdim=True)
+    std = torch.sqrt(zc.var(0, unbiased=True) + eps)          # (d,)
+    var_term = F.relu(gamma - std).mean()
+    cov = (zc.t() @ zc) / (n - 1)                             # (d,d)
+    off = cov - torch.diag(torch.diagonal(cov))
+    cov_term = off.pow(2).sum() / d
+    return var_term, cov_term
+
+
 def info_nce_complex(z1, z2, pos, comp: Complementarity, bank2=None, bank1=None):
     """Symmetric InfoNCE for one complex.
 

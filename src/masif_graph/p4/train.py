@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import time
 
 import numpy as np
@@ -20,7 +21,7 @@ import torch
 from sklearn.metrics import roc_auc_score
 
 from masif_graph.p4.encoder import HeteroEncoder, encoder_rotation_maxdiff
-from masif_graph.p4.objective import Complementarity, info_nce_complex, normalize
+from masif_graph.p4.objective import Complementarity, info_nce_complex, normalize, vicreg_terms
 from masif_graph.p4.dataset import ComplexP4, usable_complexes, D_AA, D_VV, D_VA
 
 
@@ -148,11 +149,23 @@ def train(args):
     torch.manual_seed(args.seed)
     enc = HeteroEncoder(f_atom, f_vert, D_AA, D_VV, D_VA, d=args.d, d_out=args.d_out,
                         n_layers=args.layers).to(device)
-    comp = Complementarity(args.d_out).to(device)
+    comp = Complementarity(args.d_out, tau_init=args.tau).to(device)
+    # anti-collapse stabilizers (docs/10 root cause): freeze the learnable temperature (it ran to the
+    # 0.01 floor) at a fixed value so it can't amplify a collapsed representation.
+    if args.freeze_tau:
+        with torch.no_grad():
+            comp.log_tau.fill_(math.log(args.tau))
+        comp.log_tau.requires_grad_(False)
     n_params = sum(p.numel() for p in enc.parameters()) + sum(p.numel() for p in comp.parameters())
     print(f"encoder+T params={n_params} (f_atom={f_atom} f_vert={f_vert} d={args.d} d_out={args.d_out} L={args.layers})", flush=True)
+    print(f"stabilizers: vicreg_var={args.vicreg_var} vicreg_cov={args.vicreg_cov} "
+          f"freeze_tau={args.freeze_tau}@{args.tau} t_wd={args.t_wd}", flush=True)
 
-    opt = torch.optim.Adam(list(enc.parameters()) + list(comp.parameters()), lr=args.lr, weight_decay=1e-5)
+    # T (bilinear form) gets its own weight-decay group to bound the unbounded ||T|| growth seen in diag.
+    opt = torch.optim.Adam(
+        [{"params": list(enc.parameters()), "weight_decay": 1e-5},
+         {"params": list(comp.parameters()), "weight_decay": args.t_wd if args.t_wd > 0 else 1e-5}],
+        lr=args.lr)
     sched = (torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=args.epochs, eta_min=args.lr * 0.01)
              if getattr(args, "cosine", False) else None)
     rng = np.random.default_rng(args.seed)
@@ -182,12 +195,16 @@ def train(args):
         for k in order:
             c = train_c[k].to(device) if stream else train_c[k]
             ts = time.perf_counter()
-            z1 = normalize(enc(c.p1)); z2 = normalize(enc(c.p2))
+            z1r = enc(c.p1); z2r = enc(c.p2)            # raw (pre-normalize) for VICReg anti-collapse
+            z1 = normalize(z1r); z2 = normalize(z2r)
             b2 = torch.cat(bank, 0) if (bank and args.bank > 0) else None
             tpos = getattr(c, train_pos_attr)          # --train-pos selects dense (pos) or sc (pos_sc)
             if tpos.shape[0] == 0:                      # sc set can be empty for some complexes
                 continue
             loss = info_nce_complex(z1, z2, tpos, comp, bank2=b2, bank1=b2)
+            if args.vicreg_var > 0 or args.vicreg_cov > 0:   # anti-collapse (docs/10 root cause)
+                v1, cc1 = vicreg_terms(z1r); v2, cc2 = vicreg_terms(z2r)
+                loss = loss + args.vicreg_var * 0.5 * (v1 + v2) + args.vicreg_cov * 0.5 * (cc1 + cc2)
             if not torch.isfinite(loss):   # insurance: never let one bad step corrupt the weights
                 continue
             opt.zero_grad(); loss.backward()
@@ -238,7 +255,8 @@ def train(args):
         "train_ids": train_ids, "val_ids": val_ids, "n_params": n_params,
         "init": base, "history": history, "diag": diag, "best_sc_learned_randneg": best,
         "median_step_sec": med_step, "n_steps": len(step_times), "device": device,
-        "cfg": {k: getattr(args, k) for k in ("d", "d_out", "layers", "lr", "epochs", "bank", "seed", "cosine")},
+        "cfg": {k: getattr(args, k) for k in ("d", "d_out", "layers", "lr", "epochs", "bank", "seed", "cosine",
+                                              "vicreg_var", "vicreg_cov", "freeze_tau", "tau", "t_wd", "train_pos")},
     }
     if args.out:
         with open(args.out, "w") as fh:
@@ -263,6 +281,16 @@ def main():
     ap.add_argument("--bank", type=int, default=64, help="cross-complex neg bank size per complex (0=off)")
     ap.add_argument("--cosine", action="store_true", help="cosine LR decay to 1%% of peak (stabilizer)")
     ap.add_argument("--grad-clip", type=float, default=5.0, help="grad-norm clip (lower = more stable)")
+    # anti-collapse stabilizers (docs/10 root cause: representation collapse + tau-floor + unbounded ||T||)
+    ap.add_argument("--vicreg-var", type=float, default=0.0,
+                    help="VICReg variance coef (hinge std>=1 per dim); 0=off. THE anti-collapse lever.")
+    ap.add_argument("--vicreg-cov", type=float, default=0.0,
+                    help="VICReg covariance coef (decorrelate dims); 0=off.")
+    ap.add_argument("--freeze-tau", action="store_true",
+                    help="freeze temperature at --tau (stops the learned tau running to the 0.01 floor).")
+    ap.add_argument("--tau", type=float, default=0.1, help="temperature value (init, or fixed if --freeze-tau).")
+    ap.add_argument("--t-wd", type=float, default=0.0,
+                    help="extra weight decay on the bilinear T params (bounds ||T|| growth); 0=default 1e-5.")
     ap.add_argument("--stream", action="store_true", help="lazy-load train complexes per step (full-set scale)")
     ap.add_argument("--train-pos", choices=["dense", "sc"], default="dense",
                     help="positive set for the InfoNCE loss: dense all-vertex contacts or sc-filtered")
