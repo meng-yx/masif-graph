@@ -440,11 +440,48 @@ load-bearing D-decision premise — that connectivity + rotatability drives holo
 supported by the evidence**. The genuine, bankable win is the from-scratch **surface** encoder: it matches frozen
 on holo and degrades far less on AF3.
 
-**Do NOT invest further in the atom graph.** Highest-ROI next steps (see §19 / `docs/11`): (a) test whether this
-robustness converts to better **deployment retrieval** — top-k recall on AF3 queries vs frozen (Phase-3: frozen
-AF3 top-5 recall 0.64 vs holo 0.78; does the invariant learned encoder close that?); (b) if not, the descriptor
-robustness is necessary but insufficient and the bottleneck is elsewhere (interface-atom divergence / retrieval
-aggregation), which is the Stage-C question. Absolute AF3 on the flexible sc-intersection atoms (~0.79) still
-trails frozen (0.82) because frozen starts higher there; a vertex-only encoder with more holo pretraining, not
-more graph, is the lever if that number matters.
+**Do NOT invest further in the atom graph.** Highest-ROI next step: test whether the robustness converts to
+deployment **retrieval** — done next (§20).
+
+## 20. Deployment retrieval (AF3 query → holo DB) — **INVARIANCE DOES NOT CONVERT; the encoder can't retrieve**
+
+The critical "break-your-own-good-news" test (`p4/retrieval_af3.py`, Jed CPU): the same interface-patch top-k
+retrieval Phase-3 ran on the frozen descriptor, now with the learned (z,T), frozen recomputed on the **identical**
+patches. DB = 36 holo chains, n=18 eval complexes.
+
+| method / state | top-1 | top-5 | top-10 | MRR | median rank |
+|---|---|---|---|---|---|
+| **frozen holo** | 0.50 | **0.78** | 0.92 | 0.63 | 2 |
+| **frozen AF3** | 0.42 | **0.64** | 0.78 | 0.54 | 2 |
+| **learned holo** | 0.03 | **0.19** | 0.33 | 0.13 | 17 |
+| **learned AF3** | 0.03 | **0.19** | 0.33 | 0.13 | 16 |
+
+Frozen **reproduces Phase-3 exactly** (holo top-5 0.78, AF3 0.64, drop +0.14 → harness validated). The learned
+encoder is **perfectly invariant** (AF3-vs-holo drop **0.00**) — and **near-random at retrieval** (top-5 0.19,
+median rank ~17 of 36 ≈ chance), on holo *and* AF3. Not an aggregation artifact: **four aggregations**
+(median-of-max, mean-of-max, top-5-mean, and the chain-mean deployment primitive of design §5.2) all give the
+same near-random result (`logs/phase4/m2_ret/ret_diag.log`).
+
+**Why (root cause — a training-objective gap, and it recontextualizes all of Phase 4).** Descriptor-separation
+AUC — the metric used throughout Phases 1–4 — rewards distinguishing true-contact atoms from **random** negatives,
+which the encoder does well (~0.9 hh). Retrieval demands distinguishing the true partner **chain** from **decoy
+partner chains** — and Stage-A InfoNCE was trained with random in-complex + a small random cross-complex atom
+**bank**, **never the hard decoy-partner-chain negatives** (design §5.2's "hard" tier). So the encoder learned
+"is this an interface atom / does it look contact-like," not "does this specific patch complement that specific
+partner" — under the learned T a query patch scores ~equally complementary to *any* chain's interface. The
+result: **separation-AUC massively overstates deployment value**, and the invariance win (real at the descriptor
+level) is **useless for retrieval as trained**. Frozen MaSIF, engineered for the retrieval/complementarity task,
+remains far better despite being less invariant.
+
+### M2 deployment verdict (supersedes the optimism of §17–18 for deployment)
+- The from-scratch encoder is genuinely **conformation-invariant** (§17–18) — but that is **necessary and very
+  much not sufficient**: it does **not** retrieve, scoring near-random and **far below frozen** (top-5 0.19 vs
+  0.64 on AF3). The atom graph remains irrelevant (§18).
+- **The load-bearing gap is hard-negative mining, not invariance and not the graph.** The single highest-value
+  untested lever is retraining Stage-A with **decoy-partner-chain hard negatives** (mine, per complex, the
+  best-scoring *wrong* partner chains) and re-running this retrieval test. If that lifts learned AF3 top-5 toward
+  frozen's 0.64 *while keeping* the 0.00 invariance drop, Phase 4 finally beats frozen on the deployment metric;
+  if it does not, the frozen descriptor is the pragmatic choice and the project pivots to Stage-C
+  (retrieval-cascade + co-folding, `docs/11`) built on the *frozen* descriptor.
+- This is a checkpoint decision (new training direction) — posted for the user, not launched autonomously.
 

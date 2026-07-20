@@ -595,3 +595,12 @@ holo→AF3 gap ~0 across all arms vs frozen +0.078. **M2 GATE CALL:** north-star
 unfreezing-only, now M2). The bankable win is the from-scratch surface encoder (≈frozen holo, far more AF3-robust).
 Do NOT invest further in the atom graph. Highest ROI next: AF3-query top-k retrieval vs frozen (Phase-3 gap 0.64
 vs 0.78) — does invariance convert to deployment gain? Full verdict docs/10 §18. Memory [[phase4-m2-robustness]].
+
+**RETRIEVAL TEST (p4/retrieval_af3.py, CPU) — INVARIANCE DOES NOT CONVERT TO DEPLOYMENT.** AF3-query→36-holo-DB
+top-k. Frozen reproduces Phase-3 (holo top5 0.78, AF3 0.64 — harness valid); learned encoder near-random (top5
+0.19, medrank ~17/36) on holo AND AF3 — perfectly invariant (0.00 drop) but can't retrieve, far below frozen. 4
+aggregations (incl. chain-mean §5.2) all random → not an artifact. Root cause: Stage-A InfoNCE never used hard
+decoy-partner-CHAIN negatives, only random+bank atoms → learned "contact-like" not "complements THIS partner".
+KEY LESSON: descriptor-separation AUC (used all through P1-4) massively overstates deployment value. Next lever
+(checkpoint, not auto-launched): retrain Stage-A w/ decoy-partner hard negatives + re-run retrieval; else adopt
+frozen + Stage-C. docs/10 §20; memory [[phase4-m2-robustness]].
