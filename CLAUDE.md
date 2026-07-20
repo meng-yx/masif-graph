@@ -85,6 +85,14 @@ PDBs → surfaces + per-vertex 80-D descriptors that we then pool onto atoms.
   transfers without explicit human go-ahead.** Phase 1 is CPU-feasible by design; every
   GPU-dependent step is gated. Reference descriptor-net inference runs CPU (slow but fine for
   the ~30–50-complex probe).
+- **Budget framing — the CHF-100 ceiling is a *per-session* guardrail, not a project total.**
+  It bounds a single autonomous/headless agent run that has *no* human in the loop, so a runaway
+  loop can't drain the account unattended. It does **not** accumulate across sessions: each new
+  session (especially an interactive one with a human present) starts fresh at CHF 100, and prior
+  sessions' spend (e.g. the ~CHF 22 logged through Phase-4 arc-1) does **not** count against it.
+  Do not track or subtract historical spend. The gating rule above (no GPU/large-transfer launch
+  without human go-ahead) is what actually protects the budget; the CHF-100 number is the ceiling
+  for one unattended stretch, not a lifetime cap.
 
 ## Skills (auto-available; see `.claude/skills/`)
 - **`ml-research-guardrails`** — invoke continuously during any training / data-splitting /

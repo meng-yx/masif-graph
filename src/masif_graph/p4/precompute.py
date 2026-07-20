@@ -21,6 +21,12 @@ from masif_graph.pairs.construct import vertex_contacts, atom_positives_from_ver
 from masif_graph.graph.hetero import build_hetero_graph
 
 
+def af3_state_id(holo_id: str) -> str:
+    """Phase-3 AF3 model id for a holo complex (matches experiments/run_m1_af3.af3_id)."""
+    pdb, c1, c2 = holo_id.split("_")
+    return f"{pdb}AF_{c1}_{c2}"
+
+
 def _keys(chain, surf):
     ks = []
     for r in surf.atom_idx:
@@ -36,10 +42,10 @@ def _surf_node_idx(g):
     return idx[order].astype(np.int64)
 
 
-def save_chain(cid, pid, chain, surf, g, out_dir, max_vert):
+def save_chain(cid, pid, chain, surf, g, out_dir, max_vert, state="holo"):
     sni = _surf_node_idx(g)
     assert sni.shape[0] == g.n_surf, (sni.shape, g.n_surf)
-    out = os.path.join(out_dir, f"{cid}__holo__{pid}.npz")
+    out = os.path.join(out_dir, f"{cid}__{state}__{pid}.npz")
     np.savez_compressed(
         out,
         atom_feat=g.atom_feat.astype(np.float32),
@@ -63,18 +69,28 @@ def save_chain(cid, pid, chain, surf, g, out_dir, max_vert):
     )
 
 
-def process_complex(cid, out_dir, va_radius, va_kmax, max_vert):
-    if not complex_is_available(cid):
+def process_complex(cid, out_dir, va_radius, va_kmax, max_vert, state="holo"):
+    """Build + save per-chain graphs for one complex in the given conformational STATE.
+
+    state='holo': the crystal complex `cid`, plus the holo-defined contact positives.
+    state='af3' : the Phase-3 AF3 model of `cid` (loaded via `af3_state_id`), saved under the SAME
+                  holo `cid` prefix + '__af3__' so eval can identity-join AF3 rows to holo contacts.
+                  Contacts are NOT recomputed (they are defined by the holo complex geometry).
+    """
+    state_id = cid if state == "holo" else af3_state_id(cid)
+    if not complex_is_available(state_id):
         return False
-    p1, p2 = load_complex(cid)
+    p1, p2 = load_complex(state_id)
     surfs = {}
     for pid, ch in (("p1", p1), ("p2", p2)):
         surf = build_surface_atoms(ch.verts, ch.atom_coords, ch.atom_element, ch.atom_resid,
                                    ch.desc_straight, ch.desc_flipped, ops=("mean",))
         pdb = os.path.join(PDB_DIR, f"{ch.pdb_id}_{ch.chain_ids}.pdb")
         g = build_hetero_graph(ch, surf, pdb, va_radius=va_radius, va_kmax=va_kmax, max_vert=max_vert)
-        save_chain(cid, pid, ch, surf, g, out_dir, max_vert)
+        save_chain(cid, pid, ch, surf, g, out_dir, max_vert, state=state)
         surfs[pid] = surf
+    if state != "holo":
+        return sum(s.coord.shape[0] for s in surfs.values())  # n surface atoms built (contacts are holo-only)
     # holo contacts -> owner surface-atom pairs (p1 row, p2 row).
     # Primary set `pos` = ALL touching-surface vertex contacts (pos_cutoff=1.0, no sc gate): dense &
     # stable for correspondence training/eval. Also store the sc-filtered set `pos_sc` (MaSIF's
@@ -97,6 +113,8 @@ def main():
     ap.add_argument("--va-radius", type=float, default=5.0)
     ap.add_argument("--va-kmax", type=int, default=8)
     ap.add_argument("--max-vert", type=int, default=0, help="0 = no cap")
+    ap.add_argument("--state", choices=["holo", "af3"], default="holo",
+                    help="conformational state to build (holo crystal or Phase-3 AF3 model)")
     args = ap.parse_args()
     os.makedirs(args.out, exist_ok=True)
     max_vert = args.max_vert if args.max_vert > 0 else None
@@ -104,11 +122,12 @@ def main():
     ok = 0
     for cid in ids:
         try:
-            npos = process_complex(cid, args.out, args.va_radius, args.va_kmax, max_vert)
+            npos = process_complex(cid, args.out, args.va_radius, args.va_kmax, max_vert, state=args.state)
             if npos is False:
                 print(f"{cid}: unavailable", flush=True)
             else:
-                print(f"{cid}: OK ({npos} contacts)", flush=True)
+                unit = "contacts" if args.state == "holo" else "surf-atoms"
+                print(f"{cid}: OK ({npos} {unit})", flush=True)
                 ok += 1
         except Exception as e:
             print(f"{cid}: FAIL {type(e).__name__}: {e}", flush=True)

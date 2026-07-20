@@ -340,3 +340,111 @@ test robustness (the M3 frozen-ceiling result showed unfreezing buys +0.016 ther
 the **chemistry graph adds ~nothing** is a separate question and still stands — untouched by this stability fix.
 **Cumulative session spend ≈ CHF 22 of 100.**
 
+---
+
+# arc-2 (M2) — holo→AF3 robustness: the objective gate
+
+> New session (2026-07-20), fresh per-session budget (CHF-100 ceiling is per unattended session, not a project
+> total — see CLAUDE.md). Plan: `docs/12-phase4-m2-plan.md`. Code: `p4/precompute.py --state af3` (C1),
+> `p4/eval_af3.py` (C4), `p4/dataset.py::ComplexP4B` (C2), `p4/train_stageb.py` (C3+C5). Eval set = the 31
+> Phase-3 `m1_ids` (AF3 available for 30; 18 have ≥8 sc-positives) — **held out of ALL p4 training** by design,
+> so a clean complex-level holdout. Every number scored with the frozen MaSIF descriptor on the **identical**
+> pos/neg pairs as the exact ceiling; shuffled ≈0.50; random-init control included.
+
+## 17. B.0 — zero-training robustness probe (the cheap decision checkpoint) — **INVARIANCE CONFIRMED**
+
+Scored the existing holo-only Stage-A checkpoints (`vicreg_{sc,dense}_best_seed{0,1}.pt`) AF3→holo vs frozen
+with NO invariance training, to ask: is the from-scratch graph encoder *already* more conformation-robust than
+frozen MaSIF? (Jed CPU, job 65753080, ~CHF 0.1.) Metric = descriptor-separation AUC; **hh** = holo query,
+**af3_holo** = AF3 query, DB always holo; both chain-directions pooled; 3 negative-seeds.
+
+**sc-filtered positives (n=18; the clean-contact regime where frozen is strongest):**
+
+| checkpoint | hh learned | af3 learned | **learned gap (hh−af3)** | frozen hh | frozen af3 | **frozen gap** |
+|---|---|---|---|---|---|---|
+| random-init (control) | 0.615 med | 0.614 med | +0.002 | 0.900 | 0.822 | **+0.078** |
+| **vicreg sc seed0** | 0.817 med | 0.813 med | **+0.004** | 0.900 | 0.822 | +0.078 |
+| vicreg sc seed1 | 0.821 med | 0.818 med | **+0.003** | 0.900 | 0.822 | +0.078 |
+| vicreg dense seed0 | 0.757 med | 0.740 med | +0.017 | 0.900 | 0.822 | +0.078 |
+| vicreg dense seed1 | 0.714 med | 0.705 med | +0.008 | 0.900 | 0.822 | +0.078 |
+
+_(per-complex median AUCs; pooled tells the same story — sc seed0 pooled hh 0.773 / af3 0.778.)_
+
+**The headline finding — the north-star hypothesis, shown directly for the first time.** Going holo→AF3, the
+**frozen** descriptor loses **0.078** AUC (reproducing the Phase-3 +0.08 gap exactly ⇒ harness validated), while
+the **learned graph encoder loses ~0.00–0.02** — its AF3-query separation is essentially identical to its
+holo-query separation. **The from-scratch representation is conformation-invariant; the frozen one is not.**
+Controls clean: random-init gap ≈ 0 with hh≈af3≈0.61 (the *architecture* is invariant even untrained — expected,
+since no coordinate enters the net), shuffled 0.50. sc-trained checkpoints are both **more invariant** (gap
+0.003–0.004 vs dense's 0.008–0.017) and **higher on holo** than dense-trained — sc positives yield the better
+substrate.
+
+**The absolute-level caveat, carefully stated (a cross-check corrected my first read).** The eval harness
+restricts every regime to the **intersection atoms** — holo interface atoms that *survive as AF3 surface atoms*
+— so hh and af3_holo are scored on the identical atom set (the only apples-to-apples basis for a gap). Those are
+exactly the **flexible** interface atoms that move under the conformational change, and both descriptors score
+lower on them: on the sc intersection, learned hh ≈ 0.82 med, frozen hh = 0.90. **This is NOT the learned
+encoder's holo ceiling.** On the *full* holo sc-positive set (`p4.train.evaluate`, same checkpoint, n=31) the
+from-scratch encoder **matches frozen holo→holo**: learned **median 0.944** vs frozen **0.936** (pooled 0.878 vs
+0.936) — consistent with M1. So the honest picture is: the from-scratch encoder **≈ frozen on holo** (full set,
+median), is **far more robust to AF3** (gap ~0 vs +0.078), and **beats frozen on dense** (af3 0.72 vs 0.62,
+Δ +0.10). On the flexible-atom sc intersection its absolute AF3 score (0.81 med) is ~0.01 under frozen (0.82) —
+because frozen starts ~0.08 higher on those specific hard atoms and the learned encoder erases almost all of that
+by not degrading. Net: the graph representation buys robustness **without a holo penalty on the full set**.
+
+**Consequence for M2.** The learned holo→AF3 gap is **already ~0** with no invariance training, so Stage-B
+conformer augmentation has little gap left to close — it reframes the decisive experiment onto the **graph
+ablation**: does removing atom-atom connectivity make the gap grow (the chem graph is the source of robustness →
+Phase-4's premise validated) or not (invariance comes from the surface-mesh GNN alone → Phase-3's "chem graph
+adds nothing" reconfirmed on a robustness metric). That is exactly what B.1 tests.
+
+## 18. B.1 — Stage-B conformer-augmented fine-tune + graph ablation — **chem graph gives NO robustness**
+
+8-run Jed-CPU matrix (job 65753382, ~CHF 1): graph {full, **no-atom-graph**} × query {1-conf, 2-conf} × seed
+{0,1}, fine-tuning the sc Stage-A checkpoints on 126 AF3-augmented training complexes (m3_train, 0 PDB-stem
+overlap with the eval set), stabilized recipe unchanged (VICReg 2.0/0.04, freeze-τ@0.1, T-wd 1e-3, lr 5e-4,
+clip 1.0, cosine, bank 128), structural-mismatch filter on training positives (drop AF3 if retention<0.5).
+Held-out eval = AF3→holo on the 30/18 m1_eval complexes; recipe stayed stable throughout (z_std 0.03–0.04,
+|T|₂ 8–12, no divergence). Final-epoch aggregate over all **8** runs (`logs/phase4/m2_b1/b1_summary.json`):
+
+| arm | af3 learned (final) | gap (hh−af3) | hh learned | dnh (hh − frozen-hh) |
+|---|---|---|---|---|
+| **full-graph** | 0.776 ± 0.015 | −0.007 | 0.769 | −0.131 |
+| **no-atom-graph** | **0.788 ± 0.008** | **+0.000** | **0.789** | **−0.111** |
+| 1-conf | 0.787 ± 0.010 | −0.003 | 0.784 | −0.116 |
+| 2-conf | 0.777 ± 0.014 | −0.004 | 0.773 | −0.127 |
+| frozen ceiling (identical pairs) | 0.822 (af3) | +0.078 | 0.900 (hh) | — |
+
+No-atom-graph is **better on every metric with lower variance** — the chem graph is not merely neutral, it adds
+optimization noise without benefit. 2-conf ≤ 1-conf.
+
+**Three findings, all pointing the same way:**
+1. **The atom/chemistry graph contributes NOTHING to robustness.** Dropping all atom-atom covalent edges leaves
+   AF3→holo separation **equal or marginally better** (no-graph af3 0.788±0.008 vs full 0.776±0.015; gap +0.000
+   vs −0.007; dnh closer to frozen, and lower variance). Whatever robustness the encoder has does **not** come from bond
+   connectivity / rotatability — it comes from the coordinate-free surface-mesh GNN (invariant by construction:
+   even random-init had gap ≈ 0 in B.0).
+2. **Stage-B conformer augmentation adds ~nothing over the holo-only Stage-A init.** Full-graph runs are flat
+   (af3 0.778 init → 0.774 final); the invariance was already saturated by holo-only training, so there is no
+   gap left for augmentation to close. Two-conformer = one-conformer (0.787 both).
+3. **The learned holo→AF3 gap stays ~0** (all arms −0.00 to −0.05) versus frozen's **+0.078** — the B.0
+   robustness result holds through fine-tuning; nothing breaks it, nothing improves it.
+
+### M2 GATE CALL — the north-star robustness is REAL, but the graph is not its source
+The Phase-2 gate ("does a graph encoding atom connectivity + bond rotatability, fused with the descriptor, make
+the representation robust to conformation") is answered: **the from-scratch encoder IS conformation-robust
+(holo→AF3 gap ~0 vs frozen +0.078, and ≈frozen on full holo), but the atom/chemistry graph is not what makes it
+so** — a vertex-only (no-atom-graph) encoder is equally robust. This is the **third independent null for the chem
+graph** (Phase-2 NO-GO; Phase-3 M3 where the +0.016 came entirely from unfreezing; now M2 robustness). The
+load-bearing D-decision premise — that connectivity + rotatability drives holo→apo robustness — is **not
+supported by the evidence**. The genuine, bankable win is the from-scratch **surface** encoder: it matches frozen
+on holo and degrades far less on AF3.
+
+**Do NOT invest further in the atom graph.** Highest-ROI next steps (see §19 / `docs/11`): (a) test whether this
+robustness converts to better **deployment retrieval** — top-k recall on AF3 queries vs frozen (Phase-3: frozen
+AF3 top-5 recall 0.64 vs holo 0.78; does the invariant learned encoder close that?); (b) if not, the descriptor
+robustness is necessary but insufficient and the bottleneck is elsewhere (interface-atom divergence / retrieval
+aggregation), which is the Stage-C question. Absolute AF3 on the flexible sc-intersection atoms (~0.79) still
+trails frozen (0.82) because frozen starts higher there; a vertex-only encoder with more holo pretraining, not
+more graph, is the lever if that number matters.
+

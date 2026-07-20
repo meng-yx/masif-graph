@@ -561,3 +561,37 @@ Added §8–§10 to `notebooks/inspect_p4_data.ipynb` (validated end-to-end via 
 schematic of the 4 message directions (aa/vv/va/av) + update equations; a receptive-field BFS (one surface
 atom sees 141 atoms + 299 vertices after 4 layers); and a live random-init encoder run showing z (n_surf,32),
 z_std=0.062 (healthy) vs the collapsed 0.003, and that `coord` is not an encoder input (SE(3)-invariant).
+
+## 19. arc-2 (M2) START — holo→AF3 robustness (new session 2026-07-20, interactive; fresh CHF-100)
+
+Built the M2 pipeline (plan docs/12): C1 `precompute.py --state af3` (AF3 graphs, holo-keyed); C4
+`p4/eval_af3.py` (AF3→holo separation AUC for the learned (z,T) + frozen ceiling on identical pairs); C2
+`dataset.py::ComplexP4B` (conformer sampler, holo-defined positives remapped to each conformer's rows via the
+Phase-3 identity join); C3 `p4/train_stageb.py` (conformer-augmented fine-tune, two-conformer + graph-ablation
+flags, dnh-gated Δrobustness selection); C5 mismatch filter (drop AF3 conformer if retention<0.5). Loader
+gotcha found+fixed: `load_chain_graph` was 7.2s/chain on the login node purely from unbounded-thread torch
+first-op init — `torch.set_num_threads(OMP_NUM_THREADS)` + warmup → 0.015s (480×). So M2 is CPU-feasible on
+Jed; no GPU/Kuma needed for the ~193-complex set.
+
+**B.0 (job 65753080, CHF ~0.1) — INVARIANCE CONFIRMED.** Zero-training probe of the holo-only Stage-A
+checkpoints AF3→holo. Frozen loses **0.078** AUC holo→AF3 (sc, reproduces Phase-3 +0.08 → harness valid); the
+from-scratch encoder loses **~0.00–0.02** — the learned graph representation is conformation-invariant, frozen
+is not. First direct evidence for the project's north-star hypothesis. Caveat: absolute holo ceiling on the hard
+sc complexes (~0.82 med) is below frozen 0.90, so it trades ceiling for robustness on the clean regime (but
+BEATS frozen on dense: af3 0.72 vs 0.62). sc-trained > dense-trained (more invariant + higher). Controls clean
+(random-init gap~0, shuffled 0.50). Full table: docs/10 §17.
+
+**B.1 (job 65753382, array 0-7, CHF ~1) — RUNNING.** Since the learned gap is already ~0, the decisive test is
+the graph ablation: 8 CPU runs graph{full,no-atom-graph}×{1,2-conf}×seed{0,1}, Stage-B fine-tune on 126
+AF3-augmented complexes, eval AF3→holo on 30 held-out. Does dropping atom connectivity grow the gap (graph earns
+keep) or not (Phase-3 reconfirmed)? Results → docs/10 §18.
+
+**B.1 RESULT (job 65753382, 8-run CPU matrix, CHF ~1) — CHEM GRAPH GIVES NO ROBUSTNESS.** Final-epoch aggregate
+(first 5–8 runs; 2-conf/seed0 flat, auto-collected b1_collected.txt): **no-atom-graph af3 0.793 ≥ full-graph
+0.783**, gap −0.000 vs −0.008, hh 0.792 vs 0.776, dnh −0.108 vs −0.125 — dropping atom-atom covalent edges does
+NOT hurt (marginally helps). 2-conf = 1-conf (0.787). Stage-B ≈ holo-only init (full flat 0.778→0.774). Learned
+holo→AF3 gap ~0 across all arms vs frozen +0.078. **M2 GATE CALL:** north-star robustness is REAL but the
+**graph is not its source** — a vertex-only encoder is equally robust (3rd chem-graph null: P2 NO-GO, P3 M3
+unfreezing-only, now M2). The bankable win is the from-scratch surface encoder (≈frozen holo, far more AF3-robust).
+Do NOT invest further in the atom graph. Highest ROI next: AF3-query top-k retrieval vs frozen (Phase-3 gap 0.64
+vs 0.78) — does invariance convert to deployment gain? Full verdict docs/10 §18. Memory [[phase4-m2-robustness]].

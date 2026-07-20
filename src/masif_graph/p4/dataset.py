@@ -138,3 +138,73 @@ def usable_complexes(data_dir, ids):
             if c["pos"].reshape(-1, 2).shape[0] > 0:
                 out.append(cid)
     return out
+
+
+def _chain_keys(npz_path):
+    z = np.load(npz_path)
+    return [k.decode() if isinstance(k, bytes) else str(k) for k in z["keys"].tolist()]
+
+
+class ComplexP4B:
+    """Stage-B (M2) complex: holo + AF3 graphs for both chains + conformer-remapped positives.
+
+    Positives are holo-defined (row i in holo p1, row j in holo p2). To let a training step draw the
+    query embedding from a random conformer (design §5.3) we precompute those positives expressed in
+    each (conformer_p1, conformer_p2) row-space, matching AF3<->holo surface atoms by (chain,resseq,
+    name) identity key (Phase-3 join). Only pairs whose BOTH atoms survive as AF3 surface atoms remain
+    when a chain uses its AF3 conformer (the interface-retention effect).
+
+    has_af3 is False when the AF3 graph is missing OR retention < min_retention (structural-mismatch
+    filter, C5: training hygiene — such complexes fall back to holo-only, never inject a mismatched
+    non-binding conformation as a positive).
+    """
+
+    def __init__(self, data_dir, cid, device="cpu", min_retention=0.0):
+        self.cid = cid
+        self.p1 = load_chain_graph(os.path.join(data_dir, f"{cid}__holo__p1.npz"), device)
+        self.p2 = load_chain_graph(os.path.join(data_dir, f"{cid}__holo__p2.npz"), device)
+        cz = np.load(os.path.join(data_dir, f"{cid}__contacts.npz"))
+        pos = cz["pos"].reshape(-1, 2)
+        pos_sc = cz["pos_sc"].reshape(-1, 2) if "pos_sc" in cz.files else np.zeros((0, 2), np.int64)
+        a1p = os.path.join(data_dir, f"{cid}__af3__p1.npz")
+        a2p = os.path.join(data_dir, f"{cid}__af3__p2.npz")
+        self.has_af3 = os.path.exists(a1p) and os.path.exists(a2p)
+        self.retention = float("nan")
+        if self.has_af3:
+            self.a1 = load_chain_graph(a1p, device)
+            self.a2 = load_chain_graph(a2p, device)
+            hk1 = _chain_keys(os.path.join(data_dir, f"{cid}__holo__p1.npz"))
+            hk2 = _chain_keys(os.path.join(data_dir, f"{cid}__holo__p2.npz"))
+            m1 = {k: r for r, k in enumerate(_chain_keys(a1p))}
+            m2 = {k: r for r, k in enumerate(_chain_keys(a2p))}
+            self._map1 = np.array([m1.get(hk1[i], -1) for i in range(len(hk1))], np.int64)
+            self._map2 = np.array([m2.get(hk2[j], -1) for j in range(len(hk2))], np.int64)
+            # retention on the dense positive set (fraction of holo positive PAIRS surviving in AF3)
+            surv = (self._map1[pos[:, 0]] >= 0) & (self._map2[pos[:, 1]] >= 0) if len(pos) else np.array([])
+            self.retention = float(surv.mean()) if len(surv) else float("nan")
+            if not (self.retention >= min_retention):   # NaN or below floor -> drop AF3 (mismatch filter)
+                self.has_af3 = False
+        # precompute the 4 conformer variants of each positive set
+        self._pos = {"pos": self._variants(pos, device), "pos_sc": self._variants(pos_sc, device)}
+
+    def _variants(self, pos, device):
+        """Return {(c1,c2): (P,2) long tensor} of positives remapped to the sampled conformer rows."""
+        pos = np.asarray(pos, np.int64).reshape(-1, 2)
+        out = {("holo", "holo"): torch.tensor(pos, dtype=torch.long, device=device)}
+        if not self.has_af3 or len(pos) == 0:
+            return out
+        i, j = pos[:, 0], pos[:, 1]
+        ai, aj = self._map1[i], self._map2[j]
+        for c1, c2 in (("af3", "holo"), ("holo", "af3"), ("af3", "af3")):
+            ri = ai if c1 == "af3" else i
+            rj = aj if c2 == "af3" else j
+            keep = (ri >= 0) & (rj >= 0)
+            out[(c1, c2)] = torch.tensor(np.stack([ri[keep], rj[keep]], 1), dtype=torch.long, device=device)
+        return out
+
+    def graph(self, pid, conf):
+        return getattr(self, {("p1", "holo"): "p1", ("p2", "holo"): "p2",
+                              ("p1", "af3"): "a1", ("p2", "af3"): "a2"}[(pid, conf)])
+
+    def positives(self, c1, c2, pos_key):
+        return self._pos[pos_key].get((c1, c2), self._pos[pos_key][("holo", "holo")])
