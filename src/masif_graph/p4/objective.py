@@ -62,6 +62,38 @@ def vicreg_terms(z: torch.Tensor, gamma: float = 1.0, eps: float = 1e-4):
     return var_term, cov_term
 
 
+def chain_patch_score_matrix(patches, comp: Complementarity, tau_atom: float = 0.1):
+    """Differentiable chain-level complementarity between interface patches (design §5.2/§5.4 retrieval).
+
+    patches: list of N normalized interface-atom embeddings (n_k, d). Returns a symmetric (N,N) score
+    matrix M where M[a,b] = how complementary chain a's patch is to chain b's, aggregated as
+      mean_i  [ tau_atom * logsumexp_j( s(z^a_i, z^b_j) / tau_atom ) ]      (soft max-over-partner-atoms),
+    then symmetrized. Higher = better partner. This is the smooth surrogate of the retrieval score
+    (median-of-best-match) so a chain-level InfoNCE over it directly trains partner discrimination — the
+    thing atom-vs-random InfoNCE never taught (docs/10 §20 retrieval failure)."""
+    N = len(patches)
+    T = comp.T
+    dev = patches[0].device
+    M = torch.zeros(N, N, device=dev)
+    zT = [p @ T for p in patches]                 # (n_a, d) each; precompute z^a T once
+    for a in range(N):
+        za = zT[a]
+        for b in range(N):
+            s = za @ patches[b].t()               # (n_a, n_b) bilinear scores
+            M[a, b] = (tau_atom * torch.logsumexp(s / tau_atom, dim=1)).mean()
+    return 0.5 * (M + M.t())
+
+
+def chain_retrieval_loss(patches, partner_idx, comp: Complementarity, tau_c: float = 0.1,
+                         tau_atom: float = 0.1):
+    """Chain-level InfoNCE: each chain must rank its TRUE partner above every other (decoy) chain in the
+    batch. In-batch chains ARE the hard decoy-partner negatives (design §5.2 hard tier); the softmax
+    weights the hardest automatically. partner_idx[a] = index of a's true partner chain."""
+    M = chain_patch_score_matrix(patches, comp, tau_atom) / tau_c
+    M = M - torch.diag(torch.full((M.shape[0],), float("inf"), device=M.device))  # mask self-retrieval
+    return F.cross_entropy(M, partner_idx)
+
+
 def info_nce_complex(z1, z2, pos, comp: Complementarity, bank2=None, bank1=None):
     """Symmetric InfoNCE for one complex.
 
