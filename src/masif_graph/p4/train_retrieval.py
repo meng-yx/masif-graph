@@ -108,7 +108,8 @@ def train(args):
     pos_attr = "pos_sc" if args.patch == "sc" else "pos"
     val_data = args.val_data or args.data
     train_ids = usable_complexes(args.data, [l.strip() for l in open(args.train_ids) if l.strip()])
-    train_c = [ComplexP4(args.data, c, device) for c in train_ids]
+    # preload train complexes on CPU (full-set = thousands of graphs won't fit on GPU); move per step.
+    train_c = [ComplexP4(args.data, c, "cpu") for c in train_ids]
     # keep only complexes with non-empty interface patches on both chains
     train_c = [c for c in train_c if iface_idx(getattr(c, pos_attr), 0).numel() > 0
                and iface_idx(getattr(c, pos_attr), 1).numel() > 0]
@@ -156,28 +157,27 @@ def train(args):
         for s in range(0, len(order), args.batch):
             idx = order[s:s + args.batch]
             patches, raws, partner = [], [], []
+            zfull = []   # (complex_k, z1_norm, z2_norm, pos) — reuse encodings for the atom-InfoNCE term
             for k in idx:
-                c = train_c[k]
-                for pid, col in (("p1", 0), ("p2", 1)):
-                    zr = enc(getattr(c, pid))            # raw (n,d)
-                    ii = iface_idx(getattr(c, pos_attr), col).to(device)
-                    raws.append(zr[ii]); patches.append(normalize(zr)[ii])
-                # partner indices: the two chains just appended are partners
-                b = len(patches)
-                partner += [b - 1, b - 2]
+                c = train_c[k].to(device)                # move this complex's graphs to GPU for the step
+                z1r, z2r = enc(c.p1), enc(c.p2)          # encode each chain ONCE (reused below)
+                z1n, z2n = normalize(z1r), normalize(z2r)
+                i1 = iface_idx(getattr(c, pos_attr), 0).to(device)
+                i2 = iface_idx(getattr(c, pos_attr), 1).to(device)
+                raws.append(z1r[i1]); raws.append(z2r[i2])
+                patches.append(z1n[i1]); patches.append(z2n[i2])
+                b = len(patches); partner += [b - 1, b - 2]
+                zfull.append((z1n, z2n, getattr(c, pos_attr)))
             if len(patches) < 4:
                 continue
             partner = torch.tensor(partner, device=device)
             loss = chain_retrieval_loss(patches, partner, comp, tau_c=args.tau_c, tau_atom=args.tau_atom)
-            # keep local correspondence: small atom-level InfoNCE on each complex in the batch
+            # keep local correspondence: atom-level InfoNCE, reusing the encodings above (no re-encode)
             if args.w_atom > 0:
                 al = 0.0; na = 0
-                for k in idx:
-                    c = train_c[k]
-                    z1 = normalize(enc(c.p1)); z2 = normalize(enc(c.p2))
-                    tp = getattr(c, pos_attr)
+                for (z1n, z2n, tp) in zfull:
                     if tp.shape[0] > 0:
-                        al = al + info_nce_complex(z1, z2, tp, comp); na += 1
+                        al = al + info_nce_complex(z1n, z2n, tp, comp); na += 1
                 if na:
                     loss = loss + args.w_atom * (al / na)
             if args.vicreg_var > 0 or args.vicreg_cov > 0:
