@@ -75,6 +75,15 @@ from-scratch descriptor. State this divergence loudly for anyone reading the D-d
 - **Surface-vertex nodes** — MSMS surface vertices, carrying **MaSIF's hand-crafted input channels**
   (shape index, distance-dependent curvature, Poisson–Boltzmann electrostatics, hydropathy, H-bond
   potential). We adopt MaSIF's *inputs* and its *geodesic-locality prior* — not its CNN.
+  - **⚠ Implementation deviation (verified 2026-07-29):** the built graph carries only **4 of MaSIF's 5
+    input channels** — `vert_feat = [si, hbond, charge, hphob]` (`graph/hetero.py`) — and **drops
+    `ddc` (distance-dependent curvature)**, MaSIF's *second geometric* channel. Reason: `ddc` is a
+    per-patch quantity (`compute_ddc` runs over each vertex's geodesic neighborhood in the reference
+    `read_data_from_surface.py`), and our vertex-node builder has no geodesic patches, so it was the
+    awkward one to reproduce. Net: `si` is our only geometric surface channel; the GNN partly
+    recovers curvature from vertex–vertex edge lengths + normal angles, but this is a genuine
+    input-information gap vs frozen MaSIF. Adding `ddc` back is a cheap fairness test if we ever want
+    an exact head-to-head (see `docs/10` §22).
 
 **Edges (all geometric features expressed as SE(3)-invariant scalars — D2).**
 - **atom–atom, covalent only** (bond order, rotatable flag, element-pair as edge features). *No through-space
