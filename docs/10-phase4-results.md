@@ -485,3 +485,77 @@ remains far better despite being less invariant.
   (retrieval-cascade + co-folding, `docs/11`) built on the *frozen* descriptor.
 - This is a checkpoint decision (new training direction) — posted for the user, not launched autonomously.
 
+
+## 21. Hard decoy-partner-chain miner + retrieval retrain (the §20 lever) — IN PROGRESS
+
+Built the fix §20 prescribed: a **chain-level contrastive objective** over interface patches
+(`objective.chain_retrieval_loss` + `p4/train_retrieval.py`). Each chain must rank its **true partner chain**
+above every other chain in the batch — the in-batch chains ARE the hard decoy-partner negatives (design §5.2
+hard tier) that Stage-A never used. Chain score = smooth surrogate of the retrieval score (mean over anchor
+atoms of soft-max-over-partner-atoms of the bilinear `zᵀTz`). Fine-tunes the invariant Stage-A encoder + a small
+atom-InfoNCE (keep local correspondence) + VICReg (anti-collapse). Eval = the deployment retrieval metric on the
+held-out 36-chain DB every 3 epochs.
+
+**Data scale is decisive (as predicted):**
+- **126-complex CPU proof:** flat — loss ~6.87 unmoving, held-out retrieval stuck ~0.14 (below baseline). Too
+  few chains for transferable complementarity.
+- **Full 4872-complex GPU run (Kuma 3879447, ~CHF 3, `retrieval_train_ids.txt`, 0 leak vs the 30 eval):** the
+  objective **does move** — held-out **median rank 16 → 12**, top-5 oscillating **0.19–0.28** (holo & AF3 trade
+  places), z_std rising 0.05 → 0.07 (embeddings spreading), loss creeping 7.14 → 7.01. Early (ep6/30).
+
+**Early trend (through ep9/30, climbing — NOT the final verdict):** the mined hard negatives **do** teach
+partner discrimination, and it improves steadily as training proceeds:
+
+| epoch | learned holo top-5 | learned AF3 top-5 | median rank | z_std | loss |
+|---|---|---|---|---|---|
+| init | 0.19 | 0.19 | 16 | — | — |
+| 3 | 0.28 | 0.19 | 12 | 0.051 | 7.14 |
+| 6 | 0.19 | 0.28 | 12 | 0.067 | 7.01 |
+| 9 | **0.33** | **0.25** | **10** | 0.077 | 6.93 |
+
+Median rank 16→10, both holo & AF3 top-5 rising, z_std climbing (embeddings spreading = more discriminative),
+loss decreasing — a real, sustained climb (the ep3–6 top-5 swing was noise on a coarse 36-query metric). Still
+well below frozen (0.78 holo / 0.64 AF3) at ep9 but the trajectory is open with 21 epochs left and z_std still
+rising. **Read median rank + the full trajectory, not single top-5 points.** Final numbers from
+`ret_full_result.json` at completion; monitor `logs/phase4/m2_ret/`.
+
+## 22. The real lever was DC-offset centering — retrieval gap CLOSED (M2 negative overturned)
+
+The §20/§21 "invariance does not convert" verdict was an **artifact of a collapsed direction space**, not a
+property of the encoder. Diagnosis and fix:
+
+- **Root cause (DC-offset collapse).** The raw encoder embeddings share a mean vector ~32× larger than the
+  per-chain variation. Plain L2-normalize therefore maps every chain to nearly one direction (cosine ~0.999),
+  so the bilinear score `zᵀTz` can't separate a true partner from a decoy and the loss has nothing to descend
+  into. That is exactly the flat 126-complex proof: loss 6.87→6.83 unmoving, z_std 0.027, held-out retrieval
+  pinned at the 0.19 random floor.
+- **Fix (`--center`).** Subtract the global (DB / batch) mean before normalizing, in **both** train and eval
+  (`train_retrieval.py`, `eval_af3.encode_all`). Verified three ways: (a) loss now descends 7.99→6.28 with
+  z_std jumping 0.027→0.175 (6× — de-collapsed); (b) an 8-complex **overfit sanity test** drives train_top1 to
+  **1.000**, CE 15.6→0.24, healthy encoder gradients (g_enc 61→0.5) — the objective is learnable and gradients
+  flow; (c) even at 126-complex proof scale, held-out AF3 top-5 rises 0.08→**0.36**, *beating* the earlier
+  uncentered full-set GPU run (0.28). **Centering is a bigger lever than 40× more data** — §21's "data scale is
+  decisive" framing was wrong; the collapse was.
+
+**Full-set centered GPU run (Kuma 3948531, `ret_full_ctr_result.json`, `--center`, 60 ep, 4872 train / 31 eval,
+verified 0 exact + 0 PDB-level leak; same eval DB as §20 so frozen numbers are identical):**
+
+| metric (converged ep30–60) | learned | frozen ceiling |
+|---|---|---|
+| AF3 (apo-proxy) top-5 | 0.571 | 0.639 |
+| AF3 top-1 | 0.399 | 0.417 |
+| AF3 median rank | 3.3 | 2.0 |
+| holo top-5 | 0.601 | 0.778 |
+| holo median rank | 2.0 | 1.5 |
+| **holo→AF3 top-5 drop** | **0.030** | **0.139** |
+
+Peak (ep21): AF3 top-5 **0.639** (matches the frozen ceiling), holo 0.722, median rank 2. train_top1 ~0.55 at
+4872 complexes → generalizing, not memorizing.
+
+**Honest verdict.** Learned retrieval went from near-random (0.08, the §20 negative) to **competitive with
+frozen** — the "invariance does not convert" conclusion is **overturned**. The robustness thesis lands: the
+learned encoder's holo→AF3 drop is **0.03 vs frozen 0.14** (~4.6× more conformation-robust), which is the
+project north star. **Caveat (do not oversell):** learned does **not** beat frozen outright — it slightly trails
+on absolute apo retrieval (0.57 vs 0.64) and clearly trails on holo (0.60 vs 0.78). Frozen remains a strong
+ceiling (consistent with Phase-3). The win is *robustness + now-deployable retrieval*, not dominance. Best-epoch
+0.64 is a peak, not the converged estimate — report the ep30–60 band (0.57 AF3).

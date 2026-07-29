@@ -94,12 +94,16 @@ def _frozen_score(gq, iq, gd, jd):
 
 
 @torch.no_grad()
-def encode_all(encoder, recs, device):
+def encode_all(encoder, recs, device, normalize_out=True):
+    """Per-chain embeddings. normalize_out=True L2-normalizes (default, for legacy callers); set
+    False to return RAW embeddings so the caller can mean-center before normalizing (the DC-offset
+    de-collapse — see train_retrieval.retrieval_metrics / docs/10 §21)."""
+    nrm = normalize if normalize_out else (lambda x: x)
     emb = {}
     for r in recs:
-        e = {"h1": normalize(encoder(r.hg1)), "h2": normalize(encoder(r.hg2))}
+        e = {"h1": nrm(encoder(r.hg1)), "h2": nrm(encoder(r.hg2))}
         if r.has_af3:
-            e["a1"] = normalize(encoder(r.ag1)); e["a2"] = normalize(encoder(r.ag2))
+            e["a1"] = nrm(encoder(r.ag1)); e["a2"] = nrm(encoder(r.ag2))
         emb[r.cid] = e
     return emb
 

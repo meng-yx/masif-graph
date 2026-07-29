@@ -45,11 +45,18 @@ def iface_idx(pos, col):
 # retrieval eval (the target metric) — learned & frozen on identical interface patches, held-out DB
 # ---------------------------------------------------------------------------------------------
 @torch.no_grad()
-def retrieval_metrics(enc, comp, recs, device, patch="sc"):
+def retrieval_metrics(enc, comp, recs, device, patch="sc", center=False):
     enc.eval()
     # Rec restricts to the sc intersection patch (matches the docs/10 §20 retrieval test); `patch` arg
     # only controls the *training* patch, not this eval.
-    emb = eval_af3.encode_all(enc, recs, device)
+    # center=True: subtract the global DC offset (mean over all embedded atoms in the DB) BEFORE
+    # normalizing. The raw embeddings sit on a common mean ~32x larger than per-chain variation, so
+    # plain L2-normalize collapses every chain to one direction (cosine 0.999); centering restores an
+    # ~orthogonal direction space so the bilinear score can separate partners (docs/10 §21).
+    emb = eval_af3.encode_all(enc, recs, device, normalize_out=not center)
+    if center:
+        mu = torch.cat([v for e in emb.values() for v in e.values()], 0).mean(0, keepdim=True)
+        emb = {cid: {k: eval_af3.normalize(v - mu) for k, v in e.items()} for cid, e in emb.items()}
     T = comp.T
     pat = {}
     for r in recs:
@@ -145,7 +152,7 @@ def train(args):
               f"med={la['med']:.0f} (drop {lh['top5']-la['top5']:+.2f}) || frozen holo {fh['top5']:.2f} "
               f"af3 {fa['top5']:.2f}", flush=True)
 
-    base = retrieval_metrics(enc, comp, val_recs, device, args.patch)
+    base = retrieval_metrics(enc, comp, val_recs, device, args.patch, center=args.center)
     print("[init]", flush=True); show("val", base)
 
     history, best = [], -1.0
@@ -153,7 +160,7 @@ def train(args):
     for ep in range(args.epochs):
         enc.train()
         order = rng.permutation(len(train_c))
-        losses, zstds = [], []
+        losses, zstds, tr_top1 = [], [], []
         for s in range(0, len(order), args.batch):
             idx = order[s:s + args.batch]
             patches, raws, partner = [], [], []
@@ -170,6 +177,11 @@ def train(args):
                 zfull.append((z1n, z2n, getattr(c, pos_attr)))
             if len(patches) < 4:
                 continue
+            if args.center:
+                # de-collapse: strip the batch DC offset from the raw interface atoms, then renormalize.
+                # raws is parallel to patches (same chain order), so partner indices stay valid.
+                mu = torch.cat(raws, 0).mean(0, keepdim=True)
+                patches = [normalize(r - mu) for r in raws]
             partner = torch.tensor(partner, device=device)
             loss = chain_retrieval_loss(patches, partner, comp, tau_c=args.tau_c, tau_atom=args.tau_atom)
             # keep local correspondence: atom-level InfoNCE, reusing the encodings above (no re-encode)
@@ -191,14 +203,23 @@ def train(args):
             opt.step()
             losses.append(float(loss))
             zstds.append(float(torch.cat(patches, 0).std(0).mean()))
+            # in-batch train retrieval top-1 (learn-vs-generalize signal). Only first few batches/epoch:
+            # the N^2 score matrix is a python double-loop, so skip it on most steps to avoid overhead.
+            if len(tr_top1) < 4:
+                with torch.no_grad():
+                    Mtr = chain_patch_score_matrix([p.detach() for p in patches], comp, args.tau_atom)
+                    Mtr = Mtr - torch.diag(torch.full((Mtr.shape[0],), float("inf"), device=Mtr.device))
+                    tr_top1.append(float((Mtr.argmax(1) == partner).float().mean()))
         if sched:
             sched.step()
         if (ep + 1) % args.eval_every == 0 or ep == args.epochs - 1:
-            m = retrieval_metrics(enc, comp, val_recs, device, args.patch)
+            m = retrieval_metrics(enc, comp, val_recs, device, args.patch, center=args.center)
             m["epoch"] = ep + 1; m["loss"] = float(np.mean(losses)) if losses else 0.0
             m["z_std"] = float(np.mean(zstds)) if zstds else 0.0
+            m["train_top1"] = float(np.mean(tr_top1)) if tr_top1 else 0.0
             history.append(m)
-            print(f"[ep {ep+1:3d}] loss={m['loss']:.3f} z_std={m['z_std']:.4f}", flush=True)
+            print(f"[ep {ep+1:3d}] loss={m['loss']:.3f} z_std={m['z_std']:.4f} "
+                  f"train_top1={m['train_top1']:.3f}", flush=True)
             show("val", m)
             score = m["learned_af3"]["top5"]
             if score > best:
@@ -210,7 +231,7 @@ def train(args):
     out = {"init": base, "history": history, "best_learned_af3_top5": best,
            "cfg": {k: getattr(args, k) for k in ("d", "d_out", "layers", "lr", "epochs", "batch", "seed",
                     "patch", "w_atom", "tau_c", "tau_atom", "vicreg_var", "vicreg_cov", "freeze_tau",
-                    "tau", "t_wd", "cosine", "init_ckpt")}}
+                    "tau", "t_wd", "cosine", "center", "init_ckpt")}}
     if args.out:
         json.dump(out, open(args.out, "w"), indent=2)
         print(f"wrote {args.out}", flush=True)
@@ -243,6 +264,8 @@ def main():
     ap.add_argument("--tau", type=float, default=0.1)
     ap.add_argument("--t-wd", type=float, default=1e-3)
     ap.add_argument("--cosine", action="store_true")
+    ap.add_argument("--center", action="store_true",
+                    help="mean-center embeddings (strip DC offset) before normalize; de-collapses the direction space")
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--device", default="cpu")
     ap.add_argument("--out", default=None)
