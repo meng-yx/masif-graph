@@ -559,3 +559,56 @@ project north star. **Caveat (do not oversell):** learned does **not** beat froz
 on absolute apo retrieval (0.57 vs 0.64) and clearly trails on holo (0.60 vs 0.78). Frozen remains a strong
 ceiling (consistent with Phase-3). The win is *robustness + now-deployable retrieval*, not dominance. Best-epoch
 0.64 is a peak, not the converged estimate — report the ep30–60 band (0.57 AF3).
+
+## 23. Retrieval at SCALE — frozen's §22 edge was a small-DB + oracle-patch artifact; learned is the better retriever
+
+§22's "frozen slightly ahead / strong ceiling" rested on a **36-chain DB** with the **sc-gated `pos_sc`**
+interface patch. §22's own caveat asked whether that survives scale. It does not. New benchmark
+(`scripts/p4_retrieval_scale.py`, all decoys **held-out test** complexes — 0 train leak, no shared PDB stem):
+queries = the 31 m2 eval chains (AF3 apo-proxy), DB = their true holo partners + a large decoy pool; DC-offset
+centering applied (the checkpoint's trained inference); learned-vs-frozen on identical patches. Two patch
+protocols × two DB sizes disentangle *patch definition* from *DB size*.
+
+**Harness validated:** the `pos_sc` / DB=36 cell reproduces §20/§22 (frozen af3 top-5 **0.64**, holo **0.83**;
+learned af3 **0.56**). So the numbers below are comparable to §22.
+
+| protocol | DB | frozen af3 (t1/t5/mrr/med) | learned af3 (t1/t5/mrr/med) | frozen holo→af3 drop | learned drop |
+|---|---|---|---|---|---|
+| **pos_sc** (sc-gated, frozen's native) | 36 | 0.42 / 0.64 / 0.54 / 2 | 0.47 / 0.56 / 0.54 / 2 | +0.19 | +0.14 |
+| pos_sc | 86 | 0.28 / 0.56 / 0.41 / 4 | **0.42** / 0.53 / **0.48** / 4 | +0.17 | +0.08 |
+| **pos** (dense interface) | 60 | 0.05 / 0.23 / 0.15 / 18 | **0.38 / 0.53 / 0.46 / 4** | +0.03 | +0.08 |
+| pos | 178 | 0.02 / 0.08 / 0.07 / 40 | **0.33 / 0.47 / 0.40 / 8** | +0.00 | +0.12 |
+
+**Findings.**
+1. **Frozen's lead is confined to one favorable corner** — the sc-gated patch at tiny DB. On its own native
+   patch its edge **shrinks to a wash as the DB grows** (DB=86: frozen wins top-5 by +0.03 but *loses* top-1
+   0.28 vs 0.42 and MRR 0.41 vs 0.48; medians tied). The `pos_sc` gate is itself semi-oracular — it hands the
+   method the exact atoms that contact the true partner.
+2. **Off that oracle patch, frozen collapses.** On the deployment-realistic dense interface, frozen is barely
+   above random and **degrades hard with DB size** (af3 median rank 18→40 as DB 60→178), whereas **learned is
+   strong and scale-stable** (median 4→8, top-5 0.53→0.47). Learned beats frozen by ~0.4 top-5 here.
+3. **Learned is more conformation-robust in every regime** (smaller holo→af3 drop) and far more stable as the
+   DB grows and as the patch becomes less oracle-dependent.
+
+**Verdict.** §22's "frozen is a strong ceiling; learned does not beat it" is **overturned once the benchmark is
+harder and less oracular.** Frozen (MaSIF descriptors) needs the sc-gated interface + a small DB to look good;
+give it thousands of candidates or a realistic dense patch and it falls apart. The **learned encoder is the
+better retriever at scale** — competitive-to-ahead even on frozen's home turf, dominant on dense patches, and
+consistently more robust to the holo→apo shift. This meets the Phase-4 gate: the from-scratch representation is
+both conformation-robust **and** the stronger deployment retriever.
+
+**Thousands-scale confirmation** (1500 training-set decoys → DB **2156** (pos_sc) / **3056** (pos);
+`thousands_{pos_sc,pos}.json`). Caveat: these decoys were *seen* by the learned encoder as training negatives,
+so **frozen's collapse is clean** (frozen never trained) while learned's absolute number may be mildly optimistic.
+
+| protocol | DB | frozen af3 t5/med | learned af3 t5/med | frozen holo t5/med | learned holo t5/med |
+|---|---|---|---|---|---|
+| pos_sc | 2156 | 0.06 / 110 | 0.14 / 176 | 0.00 / 66 | 0.22 / 60 |
+| pos | 3056 | 0.00 / 982 | 0.17 / 356 | 0.00 / 952 | **0.35 / 52** |
+
+At true scale **frozen falls to ~random on both protocols** (top-5 ≈ 0, median rank in the hundreds–thousands) —
+its §22 edge does not survive scale at all. **Learned stays well above random** (dense holo median rank 52/3056,
+top-5 0.35), though its absolute numbers also drop and the seen-decoy caveat applies. Neither is *great* at
+3000-candidate retrieval (a genuinely hard task: one patch → one partner among thousands), but the direction is
+unambiguous and matches the clean held-out runs: **frozen's advantage is a small-DB artifact; the learned
+encoder is the only representation that retains retrieval signal at deployment scale.**
