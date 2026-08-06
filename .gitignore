@@ -56,3 +56,15 @@ wandb/
 masif-neosurf-af2/
 
 viz_positives/
+# --- Phase-5 additions: huge/regenerable trees + bulky run logs (keep small results) ---
+/masif-neosurf-af2/
+/tools/
+/logs/*
+!/logs/phase5
+/logs/phase5/*
+!/logs/phase5/*.json
+!/logs/phase5/*.txt
+!/logs/phase5/mmseqs
+/logs/phase5/mmseqs/*
+!/logs/phase5/mmseqs/clu_cluster.tsv
+/tmp_mmseqs/

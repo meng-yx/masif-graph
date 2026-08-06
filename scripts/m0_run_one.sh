@@ -1,49 +1,47 @@
 #!/bin/bash
-# M0: run reference preprocessing + descriptor computation for ONE complex id.
-# Usage: m0_run_one.sh PDBID_C1_C2
-# Runs from masif/data/masif_ppi_search/ so masif_opts relative paths (incl. model_data)
-# resolve correctly. Logs to logs/m0/<id>.log. Emits a final status line the caller greps.
+# Holo per-complex reference preprocessing (reconstructed for Phase 5): PDBID_C1_C2 -> surfaces +
+# descriptors via the .sif. Mirrors scripts/af3_model_to_surface.sh but for the holo (experimental)
+# structure. The reference 00-pdb_download uses a dead wwPDB FTP endpoint (-> 126-byte empty stub),
+# so step 00 is patched to fetch directly from RCSB then protonate exactly as 00 did.
+# Resumable: SKIPs if descriptors already exist. Usage: m0_run_one.sh PDBID_C1_C2
+set -u
 id="$1"
-REFDATA=/scratch/ymeng/masif-graph/masif-neosurf-af2/masif/data/masif_ppi_search
-LOGDIR=/scratch/ymeng/masif-graph/logs/m0
-mkdir -p "$LOGDIR"
-log="$LOGDIR/$id.log"
+PDBID=$(echo "$id" | cut -d_ -f1); C1=$(echo "$id" | cut -d_ -f2); C2=$(echo "$id" | cut -d_ -f3)
 
-pdbid=$(echo "$id" | cut -d_ -f1)
-c1=$(echo "$id" | cut -d_ -f2)
-c2=$(echo "$id" | cut -d_ -f3)
+REFROOT=/scratch/ymeng/masif-graph/masif-neosurf-af2
+REFDATA=$REFROOT/masif/data/masif_ppi_search
+SRC=$REFROOT/masif/source
+SIF=$REFROOT/masif-neosurf_v0.1.sif
+DD=$REFDATA/descriptors/sc05/all_feat
+RAW=$REFDATA/data_preparation/00-raw_pdbs
+LOGDIR=/scratch/ymeng/masif-graph/logs/phase5/holo_surf
+mkdir -p "$LOGDIR" "$RAW"
+log="$LOGDIR/${id}.log"
 
-cd "$REFDATA" || { echo "M0_STATUS $id FAIL cd"; exit 99; }
+[ -s "$DD/$id/p1_desc_straight.npy" ] && { echo "SKIP $id"; exit 0; }
+
+export TMPDIR="/tmp/p5holo_${id}"; rm -rf "$TMPDIR"; mkdir -p "$TMPDIR"
+export PYTHONPATH="${PYTHONPATH:-}:$SRC:$REFDATA"
+SEXEC="singularity exec --bind $REFROOT:$REFROOT --bind /work:/work $SIF python"
+cd "$REFDATA" || { echo "M0_STATUS $id FAIL cd"; exit 4; }
 
 {
-  echo "=== M0 $id START $(date '+%F %T') host=$(hostname) cwd=$(pwd) ==="
-  echo "--- [1/2] data_prepare_one.sh ---"
-  timeout 3600 ./data_prepare_one.sh "$id"
-  echo "data_prepare rc=$?"
-  echo "--- [2/2] compute_descriptors.sh ---"
-  timeout 3600 ./compute_descriptors.sh "$id"
-  echo "compute_descriptors rc=$?"
-  echo "=== M0 $id END $(date '+%F %T') ==="
-} >"$log" 2>&1
-
-# Verify the artifacts we actually need exist and are non-empty.
-ply1="$REFDATA/data_preparation/01-benchmark_surfaces/${pdbid}_${c1}.ply"
-ply2="$REFDATA/data_preparation/01-benchmark_surfaces/${pdbid}_${c2}.ply"
-pdb1="$REFDATA/data_preparation/01-benchmark_pdbs/${pdbid}_${c1}.pdb"
-pdb2="$REFDATA/data_preparation/01-benchmark_pdbs/${pdbid}_${c2}.pdb"
-dd="$REFDATA/descriptors/sc05/all_feat/$id"
-pc="$REFDATA/data_preparation/04b-precomputation_12A/precomputation/$id"
-
-ok=1
-for f in "$ply1" "$ply2" "$pdb1" "$pdb2" \
-         "$dd/p1_desc_straight.npy" "$dd/p1_desc_flipped.npy" \
-         "$dd/p2_desc_straight.npy" "$dd/p2_desc_flipped.npy" \
-         "$pc/p1_X.npy" "$pc/p2_X.npy" "$pc/p1_iface_labels.npy" "$pc/p2_iface_labels.npy"; do
-  if [ ! -s "$f" ]; then echo "MISSING: $f" >>"$log"; ok=0; fi
-done
-
-if [ "$ok" = 1 ]; then
-  echo "M0_STATUS $id OK" | tee -a "$log"
+echo "=== HOLO->SURF $id $(date '+%F %T') host=$(hostname) ==="
+echo "--- 00 fetch+protonate $id ---"
+curl -sf -o "$TMPDIR/${PDBID}.pdb" "https://files.rcsb.org/download/${PDBID}.pdb"
+natom=$(grep -c '^ATOM' "$TMPDIR/${PDBID}.pdb" 2>/dev/null || echo 0)
+echo "  fetched ${PDBID}.pdb atoms=$natom"
+if [ "$natom" -lt 10 ]; then
+  echo "  rc=1 (fetch failed)"; echo "M0_STATUS $id FAIL fetch"
 else
-  echo "M0_STATUS $id FAIL missing_outputs" | tee -a "$log"
+  $SEXEC -c "import sys; sys.path.insert(0,'$SRC'); from input_output.protonate import protonate; protonate('$TMPDIR/${PDBID}.pdb', '$RAW/${PDBID}.pdb')"; echo "  rc=$?"
+  echo "--- 01 triangulate ${PDBID}_${C1} ---"; timeout 1800 $SEXEC "$SRC/data_preparation/01-pdb_extract_and_triangulate.py" "${PDBID}_${C1}"; echo "  rc=$?"
+  echo "--- 01 triangulate ${PDBID}_${C2} ---"; timeout 1800 $SEXEC "$SRC/data_preparation/01-pdb_extract_and_triangulate.py" "${PDBID}_${C2}"; echo "  rc=$?"
+  echo "--- 04 precompute masif_site ---";       timeout 1800 $SEXEC "$SRC/data_preparation/04-masif_precompute.py" masif_site "$id";        echo "  rc=$?"
+  echo "--- 04 precompute masif_ppi_search ---"; timeout 1800 $SEXEC "$SRC/data_preparation/04-masif_precompute.py" masif_ppi_search "$id";  echo "  rc=$?"
+  echo "--- descriptors ---";                    timeout 1800 $SEXEC "$SRC/masif_ppi_search/masif_ppi_search_comp_desc.py" nn_models.sc05.all_feat.custom_params "$id"; echo "  rc=$?"
+  if [ -s "$DD/$id/p1_desc_straight.npy" ]; then echo "M0_STATUS $id OK"; else echo "M0_STATUS $id FAIL"; fi
 fi
+rm -rf "$TMPDIR"
+} >> "$log" 2>&1
+grep "M0_STATUS $id" "$log" | tail -1

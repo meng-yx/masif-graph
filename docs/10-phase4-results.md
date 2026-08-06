@@ -488,6 +488,12 @@ remains far better despite being less invariant.
 
 ## 21. Hard decoy-partner-chain miner + retrieval retrain (the §20 lever) — IN PROGRESS
 
+> **⚠️ SUPERSEDED — read §24 first.** This section's headline framing ("data scale is decisive";
+> the flat 126-proof means too few chains) was **wrong**. The flatness was a **DC-offset
+> normalization bug**, not a data-scale limit — proven in §22 and consolidated as an engineering
+> postmortem in §24. The mechanics of the objective below are still accurate; only the "why it was
+> flat" diagnosis is retracted.
+
 Built the fix §20 prescribed: a **chain-level contrastive objective** over interface patches
 (`objective.chain_retrieval_loss` + `p4/train_retrieval.py`). Each chain must rank its **true partner chain**
 above every other chain in the batch — the in-batch chains ARE the hard decoy-partner negatives (design §5.2
@@ -612,3 +618,56 @@ top-5 0.35), though its absolute numbers also drop and the seen-decoy caveat app
 3000-candidate retrieval (a genuinely hard task: one patch → one partner among thousands), but the direction is
 unambiguous and matches the clean held-out runs: **frozen's advantage is a small-DB artifact; the learned
 encoder is the only representation that retains retrieval signal at deployment scale.**
+
+## 24. Postmortem — the retrieval "NULL" was a DC-offset normalization bug (engineering lesson)
+
+Consolidated, standalone write-up of the conditioning bug that made §20–21 read as a dead end.
+The story is spread across §21 (the symptom), §22 (the fix, told as an M2 narrative) and §23
+(scale); this section is the one-stop engineering reference. **One-line lesson: any retrieval
+train/eval off the invariant encoder MUST strip the shared DC offset before L2-normalize, or the
+direction space collapses to a single point and nothing can learn.**
+
+### Symptom
+The learned chain hard-negative retrieval objective (fine-tuning the invariant VICReg encoder,
+`vicreg_sc_best_seed0.pt`) looked like a hard NULL: on the 126-complex CPU proof (job 65756267)
+the loss sat at **6.87→6.83, non-monotonic**, embedding spread `z_std ≈ 0.027` never moved, and
+held-out AF3 chain top-5 stayed pinned at the **~0.19 random floor** (median rank 16–18 of 36)
+for all 30 epochs. Easy to misread as "objective can't learn / need more data."
+
+### Root cause — collapsed direction space (not data, not the objective)
+The encoder's raw per-atom embeddings share a **common-mode mean vector ~32× larger than the
+per-chain variation**. Plain L2-normalize projects that onto the unit sphere, so every chain lands
+on **nearly the same direction (cosine ≈ 0.999)**. The bilinear chain score `zᵀTz` is then almost
+constant across chains → the true partner and every decoy score the same → the contrastive loss has
+**no gradient to descend into**. `z_std ≈ 0.027` is the fingerprint of this collapse: the signal
+that discriminates partners is a tiny fluctuation riding on a huge DC offset that normalization keeps
+but discrimination needs removed.
+
+### Fix — `--center` (strip the DC offset before normalize)
+Subtract the global (batch / DB) mean from the raw interface atoms, then normalize — applied in
+**both** train ([`train_retrieval.py:180-184`](../src/masif_graph/p4/train_retrieval.py#L180-L184))
+and eval ([`train_retrieval.py:57-58`](../src/masif_graph/p4/train_retrieval.py#L57-L58)). This is
+the same DC-offset centering that converts invariance→retrieval training-free (§22); here it also
+unblocks the *learned* objective.
+
+### Three independent confirmations it was conditioning, not capability
+1. **The fix de-collapses and the loss descends.** `z_std 0.027 → 0.17` (6×), loss **7.99 → 6.28
+   monotonically**, held-out AF3 top-5 **0.08 → 0.36** on the same 126-complex proof (job 65762941).
+2. **Overfit control isolates objective+optimizer as healthy.** On 8 complexes / 16 chains the
+   centered objective drives **train top-1 → 1.000**, CE 15.6 → 0.24, with clean gradient flow
+   (g_enc 61 → 0.5). The machinery was never broken — only the input geometry was.
+3. **It scales cleanly with data** (monotone in dataset size, the opposite of a saturated objective):
+
+   | run | z_std | loss | held-out AF3 top-5 | AF3 median rank |
+   |---|---|---|---|---|
+   | uncentered proof (the NULL), 126 cx | 0.027 | 6.83 flat | 0.167 | 17 |
+   | **+center**, 126 cx (job 65762941) | 0.17 | 7.99→6.28 ↓ | 0.36 | 13 |
+   | **+center**, full-set 4872 cx (Kuma 3948531) | 0.18 | 6.73→5.28 ↓ | **0.64 = frozen ceiling** | 2–3 |
+
+### Consequence
+Centering was a **bigger lever than 40× more data** — the §21 "data scale is decisive" reading is
+retracted. Downstream, the centered full-set encoder matches the frozen ceiling on the small DB
+(§22) and **beats frozen at deployment scale / dense patches** (§23), which is what carries the
+Phase-4 gate. Artifacts: `logs/phase4/m2_ret/{proof-65756267.out, proofctr-65762941.out,
+overfit-65841850.out, proof_result.json, proofctr_result.json}`,
+`/work/upthomae/Meng/phase4/ret_full_ctr_{result.json,best.pt}`.

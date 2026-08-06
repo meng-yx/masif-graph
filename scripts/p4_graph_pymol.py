@@ -37,7 +37,7 @@ except ImportError as e:  # pragma: no cover
     raise ImportError("this script needs numpy inside PyMOL's Python: %s" % e)
 
 # node sphere radii (Å-ish, in model units) and colours (r,g,b in [0,1])
-_VERT_R, _ATOM_R = 0.15, 0.40
+_VERT_R, _ATOM_R = 0.1, 0.15
 _VERT_C = (0.20, 0.55, 1.00)   # marine
 _ATOM_C = (1.00, 0.55, 0.20)   # orange
 _AA_C = (1.00, 1.00, 1.00)     # white

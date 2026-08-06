@@ -37,6 +37,8 @@ def load_chain_graph(npz_path, device="cpu"):
     li = lambda a: torch.tensor(np.asarray(a), dtype=torch.long, device=device)
 
     aa_edge = li(z["aa_edge"])
+    if os.environ.get("MASIF_NO_AA"):  # M3 ablation: drop atom-atom covalent (chem) edges
+        aa_edge = torch.zeros(2, 0, dtype=torch.long, device=device)
     aa_feat = torch.cat([t(z["aa_order"]).reshape(-1, 4), t(z["aa_rot"]).reshape(-1, 1)], dim=1) \
         if aa_edge.shape[1] > 0 else torch.zeros(0, D_AA, device=device)
 
