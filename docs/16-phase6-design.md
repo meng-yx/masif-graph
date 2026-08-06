@@ -62,11 +62,35 @@ Two parts; do (a) before investing in (b).
   complexes, ≥2 seeds) and plot the **Phase-5 gate metric** (dense-AA retrieval + holo→AA robustness) vs
   training-set size. *If the curve is still climbing at 4.8k → more data helps (fund b). If flat → saturated;
   C should invest in the ligand axis, not scale.* Reuses the Phase-4/5 pipeline; ~a few GPU runs.
-- **(b) Source a larger PPI corpus (only if (a) says so).** Candidates, roughly in order of yield/ease:
+- **(b) Source a larger PPI corpus** — *(a) came back SATURATED (see result box below), so (b) is NOT pursued for scale.* Kept for reference: Candidates, roughly in order of yield/ease:
   **DIPS** (~42k binary complexes mined from the PDB — the standard large PPI set), PDB biological-assembly
   queries via **PISA**, **Dockground**, **ProtCID**. All are PDB-derived → same `.sif` surface pipeline
   applies. **Leakage discipline is mandatory:** sequence-cluster (≤30% id) split, and the eval set must be
   clean vs the *actual* training complexes (Phase-5 lesson).
+
+### Workstream B — RESULT (2026-08-06): SATURATED — do NOT scale PPI data
+
+Full-pipeline retrains (VICReg → centered retrieval) at 600/1500/3000 complexes × 2 seeds + the reused
+4811-full point, each evaluated on the **leak-free 287-set** (dense `pos`, DB=538, n=269):
+
+| train size | AA top5 (deployment) | HH top5 | holo→AA drop |
+|---|---|---|---|
+| 600  | 0.035, 0.041 | 0.03 | ~0 |
+| 1500 | 0.613, 0.569 | ~0.56 | ~0 |
+| 3000 | 0.636, 0.638 | ~0.64 | ~0 |
+| 4811 | 0.639 | 0.63 | −0.009 |
+
+**Verdict: the retrieval metric is saturated by ~3,000 complexes** — slope 3000→4811 is **+0.003** (within the
+±0.04 seed spread), i.e. flat. **More PPI structures beyond ~4,800 will not raise retrieval quality.** So
+Workstream C should invest in the **ligand axis (new capability), not in scaling PPI data**; sourcing a larger
+PPI corpus (DIPS etc.) is **not** warranted for its own sake.
+
+**Two nuances (honest):** (i) there is a sharp **phase transition** below the plateau — 600 complexes gives
+only ~4× chance (near-useless at DB=538), 1500 already ~90–96% of full. The 600→1500 rise is under-resolved
+(no point between). (ii) Practical implication for C's combined corpus: **keep the PPI portion ≥ ~3,000**
+complexes so the model stays in the saturated regime; diluting PPI below the transition would hurt. Robustness
+(holo→AA drop ≈ 0) holds at every size ≥ 1500 — conformation-invariance is a property of the training recipe,
+not of data volume. Curve: `notebooks/figs/fig_scaling.png`; data: `logs/phase6/gate_scale_*_pos.json`.
 
 ## 5. Workstream C — ligand-capable preprocessing + combined retrain (the payoff)
 **Goal:** a model that scores **neosurfaces** — surfaces shaped by a bound small molecule — so it can find
