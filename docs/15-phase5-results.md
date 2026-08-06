@@ -90,11 +90,13 @@ Frozen MaSIF's usable retrieval needs the semi-oracular sc patch and collapses o
 **The learned encoder is the better and more robust deployment retriever on AI-predicted structures — the
 Phase-5 north star — and the atom graph is not what delivers it.**
 
-## 7. Recommendation → Phase 6
-Gate met. Proceed to deployment-scale application on the **TED human-domainome AF2 database**
-(`/work/upthomae/Meng/TED_human_domainome_MaSIF/`, frozen descriptors already computed): run the learned
-encoder over the ~25.7k intracellular domains and validate binder retrieval on known human PPIs, then extend
-to the **ligand/neosurface** use case (molecular-glue substrate discovery, e.g. CRBN+pomalidomide → ZF
-degrons; needs the ligand-aware surface path from the recloned `masif-neosurf-af2 -b score_binder` and encoder
-changes for ligand atoms). The Stage-C false-positive/precision funnel (OT scorer + restraint co-folding)
-remains the follow-on for turning retrieval into calibrated yes/no binding calls.
+## 7. Recommendation → Phase 6  (see `docs/16-phase6-design.md`)
+Gate met, so move the PoC encoder toward deployment via three ordered workstreams: **(A)** an
+inference-illustration notebook that documents the I/O contract (per-surface-atom 32-D embedding; binding is a
+downstream pairwise `zᵀTz`, not a per-atom score); **(B)** a data-scaling ablation (is 4,872 PPI complexes
+enough? → source a larger PPI corpus, e.g. **DIPS ~42k**, if not) with the Phase-5 leakage discipline; **(C)**
+extend preprocessing to **small-molecule ligands** and **retrain on a combined PPI + protein–ligand corpus**
+(PDBbind/PLANET/PPAP + molecular-glue ternaries) to unlock the **neosurface** use case.
+**Correction:** the **TED human-domainome AF2 database is inference-only — it has no known-positive set**; all
+train/eval positives come from the **PDB**. The Stage-C false-positive/precision funnel
+(`docs/11-phase4-stageC-ppi-scoring.md`) is the phase after that.
