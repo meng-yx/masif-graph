@@ -238,7 +238,10 @@ def save_protein_npz(path, chain, surf, g):
             va_v=g.va_v.astype(np.int64), va_a=g.va_a.astype(np.int64),
             va_dist=g.va_dist.astype(np.float32), va_cos=g.va_cos.astype(np.float32),
             surf_node_idx=sni, n_surf=np.int64(g.n_surf),
-            desc_straight=_empty((g.n_surf, 80)), desc_flipped=_empty((g.n_surf, 80)),
+            # frozen MaSIF reference (mean-pooled onto surface atoms). Zeros when the descriptor
+            # net was not run -- it is pure cost for the learned encoder, which never reads them.
+            desc_straight=surf.emb_straight["mean"].astype(np.float32),
+            desc_flipped=surf.emb_flipped["mean"].astype(np.float32),
             coord=surf.coord.astype(np.float32), keys=keys,
         )
     os.replace(path + ".part.npz", path)

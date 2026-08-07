@@ -67,12 +67,13 @@ def run(args):
     comp.load_state_dict(ck["comp"])
 
     rng = np.random.default_rng(0)
-    raw, meta = {}, {}
+    raw, meta, dsc = {}, {}, {}
     for s in sys_ids:
         g1 = load_chain_graph(os.path.join(args.neosurf_data, f"{s}__holo__p1.npz"), dev)
         g2 = load_chain_graph(os.path.join(args.neosurf_data, f"{s}__holo__p2.npz"), dev)
         gl = load_chain_graph(os.path.join(args.neosurf_data, f"{s}__lig.npz"), dev)
         raw[(s, "p1")], raw[(s, "p2")], raw[(s, "lig")] = enc(g1), enc(g2), enc(gl)
+        dsc[(s, "p1")], dsc[(s, "p2")] = g1, g2
         lig_xyz = gl["coord"].cpu().numpy()
         tree = cKDTree(lig_xyz)
         meta[s] = {}
@@ -82,11 +83,18 @@ def run(args):
             meta[s][pid] = {"near": near, "n_surf": c.shape[0]}
     decoys = decoy_chains(args.decoy_data, args.decoy_ids, args.max_decoys)
     for name, path in decoys:
-        raw[("decoy", name)] = enc(load_chain_graph(path, dev))
+        g = load_chain_graph(path, dev)
+        raw[("decoy", name)] = enc(g)
+        dsc[("decoy", name)] = g
 
     mu = torch.cat([v for v in raw.values()], 0).mean(0, keepdim=True) if args.center else 0.0
     emb = {k: normalize(v - mu) for k, v in raw.items()}
     z_std = float(torch.cat(list(emb.values()), 0).std(0).mean())
+    # frozen MaSIF is only scoreable where the descriptor net actually ran; the neosurface build
+    # skips it by default, so report availability rather than silently scoring rows of zeros.
+    have_desc = {k: bool(v["desc_straight"].abs().sum() > 0) for k, v in dsc.items()}
+    frozen_ok = all(have_desc.get((s, p), False) for s in sys_ids for p in ("p1", "p2")) and \
+        all(have_desc.get(("decoy", n), False) for n, _ in decoys)
 
     # ---- DB: every subunit + every decoy, as a whole surface (subsampled for memory) ----
     def cap(z):
@@ -144,8 +152,34 @@ def run(args):
                 "top10": float((r <= 10).mean()), "top20": float((r <= 20).mean()),
                 "mrr": float((1 / r).mean()), "median_rank": float(np.median(r))}
 
+    # ---- frozen MaSIF on the IDENTICAL patches (the published representation as a baseline) ----
+    # It scores by nearest descriptor: S(q,d) = median_i min_j ||ds_qi - df_dj||, lower = better.
+    # It has no ligand arm by construction — Path B's protein surface is built WITHOUT the drug, so
+    # the frozen descriptor is ligand-blind. That makes it comparable to the `no_ligand` arm only.
+    out["frozen_available"] = bool(frozen_ok)
+    if frozen_ok:
+        fmats, fseg = [], []
+        for i, key in enumerate(dbk):
+            m = cap(dsc[key]["desc_flipped"])
+            fseg.append(torch.full((m.shape[0],), i, dtype=torch.long, device=m.device))
+            fmats.append(m)
+        Fdb, fseg = torch.cat(fmats, 0), torch.cat(fseg, 0)
+        for c in out["cases"]:
+            s, qr = c["system"], c["query"]
+            near = meta[s][qr]["near"]
+            q = dsc[(s, qr)]["desc_straight"][torch.as_tensor(near, dtype=torch.long)]
+            S = torch.full((q.shape[0], n_db), float("inf"), device=q.device)
+            S.scatter_reduce_(1, fseg.expand(q.shape[0], -1), torch.cdist(q, Fdb),
+                              reduce="amin", include_self=True)
+            score = S.median(0).values
+            score[idx_of[(s, qr)]] = float("inf")
+            order = torch.argsort(score).tolist()
+            c["rank_frozen"] = order.index(idx_of[(s, "p2" if qr == "p1" else "p1")]) + 1
+
     out["with_ligand"] = summ("rank_with_ligand")
     out["no_ligand"] = summ("rank_no_ligand")
+    if frozen_ok:
+        out["frozen"] = summ("rank_frozen")
     out["chance_top5"] = round(5.0 / max(n_db - 1, 1), 5)
     a = np.array([c["rank_with_ligand"] for c in out["cases"]], float)
     b = np.array([c["rank_no_ligand"] for c in out["cases"]], float)
@@ -154,7 +188,7 @@ def run(args):
                             "median_rank_delta": float(np.median(a - b))}
 
     print(f"DB={n_db} chains ({len(decoys)} decoy) | z_std={z_std:.4f} | chance top5={out['chance_top5']:.4f}")
-    for k in ("with_ligand", "no_ligand"):
+    for k in ("with_ligand", "no_ligand") + (("frozen",) if frozen_ok else ()):
         m = out[k]
         print(f"  {k:12s} n={m['n']:3d} top1={m['top1']:.3f} top5={m['top5']:.3f} "
               f"top10={m['top10']:.3f} MRR={m['mrr']:.3f} medRank={m['median_rank']:.0f}")
@@ -163,8 +197,9 @@ def run(args):
           f"(median rank delta {out['ligand_effect']['median_rank_delta']:+.0f})")
     print("  per-case ranks (with/without ligand):")
     for c in out["cases"]:
+        fr = f" / frozen {c['rank_frozen']:5d}" if "rank_frozen" in c else ""
         print(f"    {c['system']:10s} {c['query']} near={c['n_near']:4d} lig={c['n_lig']:3d} "
-              f"{c['rank_with_ligand']:5d} / {c['rank_no_ligand']:5d}")
+              f"{c['rank_with_ligand']:5d} / {c['rank_no_ligand']:5d}{fr}")
     if args.out:
         os.makedirs(os.path.dirname(args.out) or ".", exist_ok=True)
         json.dump(out, open(args.out, "w"), indent=1)

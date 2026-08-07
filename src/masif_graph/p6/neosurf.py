@@ -27,7 +27,7 @@ import numpy as np
 from scipy.spatial import cKDTree
 
 from masif_graph.graph.hetero import build_hetero_graph
-from masif_graph.io.reference import PDB_DIR, PRECOMP_DIR
+from masif_graph.io.reference import DESC_DIR, PDB_DIR, PRECOMP_DIR
 from masif_graph.p6.pl_graph import (POS_CUT, POS_SC_CUT, _ChainShim, ligand_graph,
                                      save_ligand_npz, save_protein_npz)
 from masif_graph.pairs.construct import atom_positives_from_vertex_contacts, vertex_contacts
@@ -79,17 +79,36 @@ def fetch_ligand(pdb, asym, cache_dir):
     return mol
 
 
+def _descriptors(cid, pid, n_vert):
+    """Frozen MaSIF per-vertex descriptors if the descriptor net was run, else zeros.
+
+    They are never fed to the learned encoder; they exist so the neosurface benchmark can also
+    score the *published* representation on the identical patches (`neosurf_bench --method frozen`).
+    """
+    d = os.path.join(DESC_DIR, cid)
+    try:
+        s = np.load(os.path.join(d, f"{pid}_desc_straight.npy"))
+        f = np.load(os.path.join(d, f"{pid}_desc_flipped.npy"))
+        if s.shape[0] == n_vert and f.shape[0] == n_vert:
+            return s.astype(np.float32), f.astype(np.float32)
+    except (FileNotFoundError, OSError, ValueError):
+        pass
+    z = np.zeros((n_vert, 80), np.float32)
+    return z, z
+
+
 def _load_chain(sys_id, pid, chains):
-    pc = os.path.join(PRECOMP_DIR, f"{sys_id}_{chains[0]}_{chains[1]}")
+    cid = f"{sys_id}_{chains[0]}_{chains[1]}"
+    pc = os.path.join(PRECOMP_DIR, cid)
     xyz = [np.load(os.path.join(pc, f"{pid}_{a}.npy")) for a in ("X", "Y", "Z")]
     verts = np.column_stack(xyz).astype(np.float64)
     idx = 0 if pid == "p1" else 1
     pdb_path = os.path.join(PDB_DIR, f"{sys_id}_{chains[idx]}.pdb")
-    chain = _ChainShim(f"{sys_id}_{chains[0]}_{chains[1]}", sys_id, chains[idx], verts, pdb_path)
+    chain = _ChainShim(cid, sys_id, chains[idx], verts, pdb_path)
     chain.pid = pid
-    zero = np.zeros((len(verts), 80), np.float32)
+    ds, df = _descriptors(cid, pid, len(verts))
     surf = build_surface_atoms(verts, chain.atom_coords, chain.atom_element, chain.atom_resid,
-                               zero, zero, ops=("mean",))
+                               ds, df, ops=("mean",))
     g = build_hetero_graph(chain, surf, pdb_path, unified_atom_feat=True)
     return chain, surf, g, verts
 

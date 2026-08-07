@@ -103,14 +103,19 @@ def axis3():
     print("### Axis 3 — neosurface benchmark (28 ligand-induced cases)\n")
     print("| model | with-ligand top5 | medR | no-ligand top5 | medR | ligand helps/hurts/ties |")
     print("|---|---|---|---|---|---|")
+    froz = None
     for t in tags():
         d = load(f"neosurf_{t}.json")
         if not d:
             continue
         w, n, e = d["with_ligand"], d["no_ligand"], d["ligand_effect"]
+        froz = d.get("frozen", froz)
         print(f"| {LABEL.get(t, t)} | {w['top5']:.3f} | {w['median_rank']:.0f} "
               f"| {n['top5']:.3f} | {n['median_rank']:.0f} "
               f"| {e['n_better_with_ligand']}/{e['n_worse']}/{e['n_tied']} |")
+    if froz:
+        print(f"| *frozen MaSIF (ligand-blind by construction)* | n/a | n/a "
+              f"| {froz['top5']:.3f} | {froz['median_rank']:.0f} | n/a |")
     d = load(f"neosurf_{tags()[0]}.json") if tags() else None
     if d:
         print(f"\nDB = {d['db_chains']} chains ({d['n_decoys']} held-out decoy chains), "
