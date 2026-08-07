@@ -111,3 +111,78 @@ Anchor: 8 cores x 24 h ~ CHF 1 -> **1 core-hour ~ CHF 0.005**.
 - Kuma GPU: VICReg + retrieval, a few CHF per run (Phase-4/5 anchor).
 Peak /scratch disk for the 04b precompute is ~40 MB/complex -> each array task deletes a complex's
 precompute directory as soon as its npz is written.
+
+## 2. C(a).3 — Path-B protein-ligand graph builder (DONE, validated on 5hls)
+
+**Key structural decision:** a PDBbind complex is emitted as the **same artefact as a PPI complex** —
+`{cid}__holo__p1.npz` (protein: atoms+vertices+3 edge types, 26-D atom feats), `{cid}__holo__p2.npz`
+(ligand: atoms + covalent edges, `n_vert=0`, every heavy atom a readout node), `{cid}__contacts.npz`
+(pos <=5.0 A / pos_sc <=4.0 A as (protein_surf_row, ligand_row)). Consequence: `p4.dataset.ComplexP4`,
+the chain-level retrieval loss and the whole Phase-4 loop consume the mixture with **no new code
+path** — the mixture is just a longer id list.
+
+The two sides are encoded **independently**, exactly as the two chains of a PPI complex are. Putting
+ligand atoms inside the protein graph (the naive reading of "ligand atoms as graph nodes") would let
+protein vertices message into them, so a ligand embedding would already encode its own protein and
+retrieval would be free — the metric would look spectacular and mean nothing.
+
+Protein-side prep: PDBbind `_protein.pdb` carries 1-24 chains but the ligand touches few. Keep the
+chains with a heavy atom within 6 A of the ligand, merge to one pseudo-chain `A`, renumber residues
+sequentially. Cap 8,000 heavy atoms (MSMS cost). Profiled on 150 random refined ids: **148 usable**,
+median 2,027 heavy atoms (p90 4,313), ligand median 25 heavy atoms.
+
+Validation (5hls, read the actual output): protein 1,061 atoms / 3,039 verts / 648 surface atoms;
+ligand 26 atoms / 58 directed bonds / 20 C, 3 N, 2 O, 1 F, 17 aromatic, 20 in-ring, 1 donor,
+3 acceptors; 197 contacts over 40 protein + 26 ligand atoms. Encoder forward **and backward** finite
+on both graphs (the 0-vertex ligand graph exercises every empty-edge branch).
+
+Also fixed a latent crash in `p6/atoms.py::_elem_onehot` — it called `list.index` unguarded, so any
+element outside the 9-element table (Se in MSE, metals) raised `ValueError`.
+
+## 3. C(b).1 — preprocessing children (submitted 13:46)
+
+| job | what | shape |
+|---|---|---|
+| 65982544 | PDBbind smoke (2x3) | ok; **87 s/complex**, far below the 6 min estimate |
+| 65982545 | PPI 26-D refeat, 4,871 complexes | array 0-7 |
+| 65982546 | Phase-5 eval refeat (holo) | **301/301, zero failures** |
+| 65982573 | Phase-5 eval refeat (af3) | array 0-1 |
+| 65982574 | PDBbind refined, 5,316 complexes | array 0-265%220, 20 ids/task |
+
+`.sif` steps trimmed to **01 + 04b(ppi_search, p1 only)** — 04a/masif_site and the descriptor net are
+never read by the learned encoder. Each task uses a private `TMPDIR` (computeMSMS/APBS temp files are
+otherwise shared) and deletes the ~40 MB precompute dir as soon as the npz is written.
+
+**Refeat failure analysis (the check earning its keep).** ~2.6% of chains fail, two causes:
+(1) a race on the shared RCSB cache — two array tasks wrote the same `.part` file; fixed with a
+per-pid temp name; (2) atom-count mismatches (e.g. 1PFF_A: 2,519 re-derived vs 2,511 stored). Traced
+to *trailing* residues — the current RCSB entry has C-terminal atoms the 2026-07 snapshot lacked, i.e.
+entry remediation, not a systematic per-residue-type bias. Those complexes are **dropped, not
+patched**: the 14-D bit-exactness + surface-key checks reject them, which is the entire point of
+having them. Losing ~5% of 4,871 still leaves far more than the ~3,000 the Workstream-B verdict asks for.
+
+Cost so far: **~CHF 1** (estimates: pdbbind smoke 0.09, refeat 0.13+0.03, full pdbbind array ~2-6).
+
+## 4. C(b).2 / C(c).1 — split + unified training code (written, debug-run green)
+
+- `p6/split.py` — mmseqs2 @30% id over PPI chains + PDBbind chain sequences, plus RDKit Murcko
+  scaffolds. Rule: the frozen Phase-5 287-clean eval set's protein clusters are forbidden in **both**
+  corpora (a PDBbind target homologous to an eval chain leaks into the do-no-harm gate just as surely
+  as a PPI one). The protein-ligand held-out is carved by connected components of "shares a protein
+  cluster OR a ligand scaffold", with a documented fallback if the scaffold graph is degenerate, and
+  the scaffold-unseen subset is always reported separately.
+- `p6/mixed_bench.py` — chain retrieval over a mixed DB, `median_i max_j z^T T z` + mandatory
+  centering, reported per type and per query role (pocket->ligand vs ligand->pocket), with a
+  same-type decoy pool (a protein beating a *ligand* decoy is not binder discrimination) and a
+  shuffled control.
+- `p6/train_unified.py` — Phase-4 recipe (chain InfoNCE + atom InfoNCE + VICReg, freeze-tau 0.1,
+  T-wd 1e-3, lr 5e-4 cosine, d64/32/L4, centering) on the combined corpus. Batches are built to hold
+  **both** types (`--pl-frac`), since the in-batch chains ARE the hard decoy pool.
+  Divergences logged: `--max-patch 128` (Phase 4 was uncapped; the chain score matrix is
+  O(N^2*n_a*n_b) and PPI dense patches are 100s of atoms vs a ligand's ~25), and model selection on
+  mixed held-out MRR (there is no AF3 state for protein-ligand complexes).
+
+CPU debug run (24 PPI + 39 PL train, 20+30 val): loss 7.99 -> 7.59, in-batch train top-1 0.05 ->
+0.16, z_std flat 0.163 (no collapse), |T| flat, gradients finite. **The untrained network sits at
+chance on every group** (pl top5 0.15 vs chance 0.167; ppi 0.275 vs 0.25) — the eval is not
+accidentally leaking.

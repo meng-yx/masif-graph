@@ -46,7 +46,7 @@ def fetch_raw_pdb(pdb_id: str, cache_dir: str) -> str:
     path = os.path.join(cache_dir, f"{pdb_id.upper()}.pdb")
     if os.path.exists(path) and os.path.getsize(path) > 0:
         return path
-    tmp = path + ".part"
+    tmp = f"{path}.part{os.getpid()}"   # per-process: array tasks share this cache dir
     urllib.request.urlretrieve(RCSB_URL.format(pdb=pdb_id.upper()), tmp)
     os.replace(tmp, path)
     return path
@@ -157,7 +157,7 @@ def refeat_chain(npz_path: str, pdb_path: str, out_path: str, strict: bool = Tru
     payload = {k: z[k] for k in z.files}
     payload["atom_feat"] = feat26.astype(np.float32)
     os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
-    tmp = out_path + ".part.npz"          # savez_compressed appends .npz unless already present
+    tmp = f"{out_path}.part{os.getpid()}.npz"   # savez appends .npz; pid keeps tasks disjoint
     with open(tmp, "wb") as fh:
         np.savez_compressed(fh, **payload)
     os.replace(tmp, out_path)

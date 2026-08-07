@@ -56,7 +56,12 @@ def ligand_coords(pdbbind_dir: str, pid: str) -> np.ndarray:
                      if mol.GetAtomWithIdx(i).GetAtomicNum() > 1], dtype=np.float64)
 
 
-def prep_protein_pdb(pdbbind_dir: str, pid: str, out_pdb: str, max_atoms: int = 20000) -> dict:
+def _is_heavy(line: str) -> bool:
+    el = line[76:78].strip() or "".join(c for c in line[12:16].strip() if c.isalpha())[:1]
+    return el.upper() not in ("H", "D")
+
+
+def prep_protein_pdb(pdbbind_dir: str, pid: str, out_pdb: str, max_atoms: int = 8000) -> dict:
     """Write the pocket-bearing protein chains as ONE pseudo-chain 'A' for the `.sif` pipeline.
 
     PDBbind `_protein.pdb` files carry 1-24 chains but the ligand only touches a few. Keeping every
@@ -89,14 +94,15 @@ def prep_protein_pdb(pdbbind_dir: str, pid: str, out_pdb: str, max_atoms: int = 
             keep_chains.add(key[0])
 
     kept = [k for k in order if k[0] in keep_chains]
-    n_atoms = sum(len(lines_by_res[k]) for k in kept)
+    # PDBbind `_protein.pdb` files are protonated, so cap on HEAVY atoms (what MSMS/the graph sees)
+    n_heavy = sum(sum(_is_heavy(l) for l in lines_by_res[k]) for k in kept)
     info = {"pid": pid, "chains_all": len(chains_seen), "chains_kept": len(keep_chains),
-            "n_res": len(kept), "n_atom": n_atoms, "n_lig_atom": int(len(lig))}
-    if n_atoms == 0:
+            "n_res": len(kept), "n_heavy": n_heavy, "n_lig_atom": int(len(lig))}
+    if n_heavy == 0:
         info["skip"] = "no protein chain within cutoff"
         return info
-    if n_atoms > max_atoms:
-        info["skip"] = f"n_atom {n_atoms} > {max_atoms}"
+    if n_heavy > max_atoms:
+        info["skip"] = f"n_heavy {n_heavy} > {max_atoms}"     # MSMS cost blows up on assemblies
         return info
 
     os.makedirs(os.path.dirname(out_pdb) or ".", exist_ok=True)
