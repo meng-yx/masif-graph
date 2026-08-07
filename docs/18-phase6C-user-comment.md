@@ -57,3 +57,25 @@ containing structure (if used) will always come from experimentally determined s
 if you need an apo structure for ligand for being balanced (you make a decision based on whether the training
 workflow always need pairs of holo vs apo structure for each entry), I guess you can just use the same ligand
 structure as both apo and holo. 
+### C(b) complete — corpus built, split clean
+PDBbind refined **5,240/5,316** built (99.7% of non-skipped), PPI **4,711/4,871** re-featurised to
+26-D, Phase-5 eval set complete (301 holo + 284 AF3), neosurface benchmark 14/14 systems (28 cases).
+Split verify against the *actual* train ids: **0 leaks on all three axes**; 394 PDBbind complexes had
+to be dropped for being homologous to the PPI eval set (the cross-corpus filter earning its keep —
+a per-corpus component graph could not see those edges, and an earlier version of the builder leaked
+203/300 protein-ligand holdouts before the verify step caught it).
+
+Two harness validations before any result: frozen MaSIF on the re-featurised 26-D eval npz
+reproduces the Phase-5 published gate **exactly** (HH 0.084/medR 110, AA 0.061/medR 128, n=269,
+DB=538), and an untrained encoder reads chance on all three axes.
+
+### C(c).2 — three Kuma runs launched (4026517 combined / 4026518 ppionly / 4026519 plonly)
+I added a **third** run beyond the brief: `plonly` (ligands only). It is the control that actually
+tests Workstream C's thesis — if `combined` beats `plonly` on the ligand axis, PPI complementarity
+really did transfer through the shared 26-D atom space. Without it, "the combined model can retrieve
+ligands" would not distinguish transfer from simply having trained on PDBbind. `ppionly` is the
+do-no-harm control (separates "26-D features changed something" from "ligands changed something").
+Epoch counts are set so **per-type exposure is equal** across the three runs, so differences are
+attributable to the other corpus being present rather than to more gradient steps.
+
+Spend: ~CHF 3 Jed + CHF 0.43 Kuma probe so far; the three runs are estimated at ~CHF 8-9.

@@ -91,7 +91,32 @@ rather than pretended away: the `val_pl_scaffold_unseen` subset (clean on **both
 evaluated and reported separately alongside the full holdout.
 
 ### 2.3 Sizes
-*(filled when the PDBbind array completes)*
+
+Built: PDBbind refined **5,240 / 5,316** (72 skipped by the >8,000-heavy-atom cap or having no chain
+within 6 Å of the ligand, 3 `.sif` failures → **99.7%** of non-skipped); PPI **4,711 / 4,871**
+re-featurised; Phase-5 eval 301 holo + 284 AF3; neosurface 14/14 systems → 28 cases.
+
+| split | n | note |
+|---|---|---|
+| `train_ppi` | 4,418 | |
+| `train_pl` | 4,546 | |
+| `val_pl` | 300 | of which **198 scaffold-unseen** (clean on both axes) |
+| `val_ppi_stageA` / `val_ppi_stageB` | 80 / 197 | checkpoint-selection monitors only |
+| `eval_ppi` (frozen) | 287 | never used for selection |
+
+**394 PDBbind complexes were dropped for being homologous to the PPI eval set.** Without the
+cross-corpus filter those would have gone straight into the do-no-harm gate's training data.
+
+### 2.4 Two harness validations worth stating before any result
+1. **The re-featurised eval set is the Phase-5 eval set.** Frozen MaSIF on the 26-D npz reproduces
+   the Phase-5 published gate *exactly* — HH top5 0.084 / medRank 110 and AA top5 0.061 / medRank 128
+   on n=269, DB=538, the same three decimals and the same denominators. So the `atom_feat` patch left
+   descriptors, interface definitions and the AF3 join untouched, and the learned numbers below are
+   directly comparable to the Phase-5 bar (**HH 0.630 / AA 0.639**).
+2. **All three axes read chance for an untrained encoder** (`randinit`): gate learned top5 0.009–0.015
+   against a shuffled control of 0.011; mixed held-out top5 0.014–0.023 against chance 0.017–0.025;
+   neosurface top5 0.000, median rank 262 of 596, ligand effect 12 better / 16 worse. The harness is
+   not leaking.
 
 ---
 
