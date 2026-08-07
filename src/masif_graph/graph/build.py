@@ -170,6 +170,7 @@ def build_atom_graph(
     pdb_path: str,
     spatial_cutoff: float = 5.0,
     max_spatial_deg: int = 24,
+    with_spatial: bool = True,
 ):
     """Build the per-chain AtomGraph, aligned to `chain` / `surf` (io.reference atom table).
 
@@ -235,11 +236,15 @@ def build_atom_graph(
         cov_order[np.arange(len(corder)), np.array(corder)] = 1.0
     cov_rot = np.array(crot, dtype=np.float32)
 
-    # spatial edges: radius graph, exclude covalent-bonded pairs, cap degree
+    # spatial edges: radius graph, exclude covalent-bonded pairs, cap degree.
+    # `with_spatial=False` skips this (Phase-4+ designs drop spatial edges entirely — design §4 —
+    # so callers that only want the covalent graph + node features can avoid the O(n·deg) build).
     covset = set(zip(ci, cj))
-    tree = cKDTree(coords)
-    pairs = tree.query_pairs(spatial_cutoff, output_type="ndarray")
     si, sj, sd = [], [], []
+    pairs = []
+    if with_spatial:
+        tree = cKDTree(coords)
+        pairs = tree.query_pairs(spatial_cutoff, output_type="ndarray")
     if len(pairs):
         d = np.linalg.norm(coords[pairs[:, 0]] - coords[pairs[:, 1]], axis=1)
         # cap per-node degree by keeping nearest neighbours

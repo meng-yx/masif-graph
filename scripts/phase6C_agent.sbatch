@@ -15,8 +15,8 @@ export HOME=/home/ymeng
 export PATH=/home/ymeng/.local/bin:/home/ymeng/miniconda3/bin:/usr/bin:/bin:$PATH
 cd /scratch/ymeng/masif-graph || exit 2
 
-MODEL=claude-sonnet-5
-FLAGS="--model $MODEL --dangerously-skip-permissions --effort high --max-turns 800"
+MODEL=claude-opus-5
+FLAGS="--model $MODEL --dangerously-skip-permissions --effort max --max-turns 800"
 SENTINEL=logs/PHASE6C_DONE
 GIVEUP=logs/PHASE6C_GIVEUP
 STARTED=logs/phase6C/_agent_started
