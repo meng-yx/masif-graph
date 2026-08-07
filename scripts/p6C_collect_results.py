@@ -80,17 +80,22 @@ def axis2():
         r = d["results"]
         print(f"\nchance top5: PPI {r.get('ppi', {}).get('chance_top5')}, "
               f"P-L {r.get('pl', {}).get('chance_top5')}.\n")
-    print("Scaffold-unseen subset (clean on protein cluster AND ligand scaffold):\n")
-    print("| model | P-L top5 | P-L medR | n |")
-    print("|---|---|---|---|")
-    for t in tags():
-        d = load(f"mixed_scafclean_{t}.json")
-        if not d:
-            continue
-        p = d["results"].get("pl", {})
-        print(f"| {LABEL.get(t, t)} | {p.get('top5', 0):.3f} | {p.get('median_rank', 0):.0f} "
-              f"| {p.get('n', 0)} |")
-    print()
+    for pref, title in (("mixed_scafclean_",
+                         "Scaffold-unseen subset (clean on protein cluster AND ligand scaffold)"),
+                        ("mixed_scafdedup_",
+                         "Scaffold-deduplicated holdout (one complex per scaffold; removes the "
+                         "congeneric-decoy ambiguity that depresses top-1)")):
+        print(f"{title}:\n")
+        print("| model | P-L top5 | P-L top1 | P-L medR | n | chance top5 |")
+        print("|---|---|---|---|---|---|")
+        for t in tags():
+            d = load(f"{pref}{t}.json")
+            if not d:
+                continue
+            p = d["results"].get("pl", {})
+            print(f"| {LABEL.get(t, t)} | {p.get('top5', 0):.3f} | {p.get('top1', 0):.3f} "
+                  f"| {p.get('median_rank', 0):.0f} | {p.get('n', 0)} | {p.get('chance_top5')} |")
+        print()
 
 
 def axis3():

@@ -38,6 +38,12 @@ echo "--- axis 2b: scaffold-unseen subset (clean on BOTH leakage axes) ---"
 $PY -u -m masif_graph.p6.mixed_bench \
   --pl-data "$P6/npz_pl" --pl-ids "$P6/split/val_pl_scaffold_unseen.txt" \
   --ckpt "$CKPT" --center --pos-key pos --out "$OUT/mixed_scafclean_${TAG}.json"
+echo "--- axis 2c: scaffold-DEDUPLICATED holdout (one complex per scaffold) ---"
+echo "    38% of val_pl share a Murcko scaffold with another val complex, so a congeneric decoy can"
+echo "    legitimately outrank the true ligand and depress top-1. This variant removes that ambiguity."
+$PY -u -m masif_graph.p6.mixed_bench \
+  --pl-data "$P6/npz_pl" --pl-ids "$P6/split/val_pl_scafdedup.txt" \
+  --ckpt "$CKPT" --center --pos-key pos --out "$OUT/mixed_scafdedup_${TAG}.json"
 
 echo "=== AXIS 3: neosurface benchmark (28 ligand-induced cases) $(date) ==="
 $PY -u -m masif_graph.p6.neosurf_bench --neosurf-data "$P6/npz_neosurf" \
