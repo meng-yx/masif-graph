@@ -190,3 +190,23 @@ python scripts/p6C_collect_results.py          # regenerates the tables above fr
 
 ## 8. Verdict
 *(pending)*
+
+## 9. Explicitly NOT in scope here (and one decision recorded for later)
+
+* **No apo/predicted ligand conformations, anywhere.** Training is holo-only for both corpus types;
+  the positive pair is always the two sides of *one* complex, never a holo-vs-apo pair, so the
+  workflow never needs a per-entry conformational pair. AF3/apo states appear only in the axis-1
+  Phase-5 gate, which is protein–protein. Axis-3 ligand geometry is the **experimental bound pose**
+  (RCSB ModelServer instance endpoint) — matching the deployment assumption that a ligand-bearing
+  structure always comes from experiment.
+* **Ligand-axis robustness (AF3-apo protein + experimental ligand)** is the natural next test of the
+  project's north star applied to protein–ligand, and it is out of scope for C (the handoff excludes
+  new AF3/MSA generation). The rule for it is fixed in advance by user decision: **the protein
+  varies, the ligand stays at its experimental pose** — predicting an apo ligand conformation is
+  meaningless, and if a future workflow needs a nominal pair, the ligand is duplicated unchanged.
+* **Ligand-derived surface vertices.** Path B gives the ligand chemistry and connectivity but no
+  MSMS shape channel (see §1). A from-scratch ligand-surface tier remains the stretch option.
+* MolGlueDB's 114 ternary PDBs were **not** used: the masif-neosurf `computational_benchmark` is the
+  better-specified asset (explicit subunit split + drug assignment + a decoy protocol), and it makes
+  the number directly comparable to the published method. MolGlueDB stays available for a later,
+  larger neosurface benchmark.
