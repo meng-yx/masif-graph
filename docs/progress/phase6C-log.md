@@ -231,3 +231,52 @@ and on the neosurface axis it scores exactly chance (medRank 44/108, ligand effe
 
 Also fixed: `p6C_gate.sbatch` died 8 s in (job 65982977) because `set -u` plus conda's gromacs
 deactivate hook dereferences unset variables. The gate now calls the env's interpreter directly.
+
+## 7. Final corpus + split (2026-08-07 ~15:20)
+
+PDBbind refined array finished: **5,240 / 5,316 complexes built** (72 skipped by the >8,000-heavy-atom
+cap or no chain within 6 A of the ligand; 3 `.sif` 04 failures) = **99.7% of non-skipped**. PPI 26-D
+re-featurisation: **4,711 / 4,871**. Phase-5 eval: 301 holo + 284 AF3. Neosurface: 14/14 systems.
+
+Final cluster-clean split (`logs/phase6C/split/`, report in `split_report.json`):
+
+| set | n |
+|---|---|
+| train_ppi | 4,418 |
+| train_pl | 4,546 |
+| val_pl (held out) | 300 — of which **198 scaffold-unseen** |
+| val_ppi_stageA / stageB | 80 / 197 |
+| eval_ppi (frozen Phase-5 287-clean) | 287 |
+
+`verify` (against the ACTUAL train ids): eval-into-train **0**, val_pl-protein-into-train **0**,
+PPI-holdout-into-train **0**. **394 PDBbind complexes were dropped for being homologous to the PPI
+eval set** — the cross-corpus filter earning its keep; without it those would have leaked straight
+into the do-no-harm gate.
+
+The scaffold graph is degenerate (largest component 61% of the corpus once scaffold edges chain
+through protein edges), so the split runs on protein clusters and scaffold overlap is reported
+rather than pretended away: 102/300 val_pl share a scaffold with train, 198 do not, and the
+scaffold-unseen subset is evaluated separately.
+
+## 8. Kuma training children (submitted 15:2x)
+
+| job | mode | corpus | epochs A/B | selection |
+|---|---|---|---|---|
+| 4026517 | `combined` | 4,418 PPI + 4,546 P-L | 15 / 32 | mixed held-out MRR |
+| 4026518 | `ppionly` | 4,418 PPI | 30 / 32 | PPI held-out MRR |
+| 4026519 | `plonly` | 4,546 P-L | 30 / 32 | P-L held-out MRR |
+
+**Epoch counts were chosen so per-type exposure matches, not so epoch counts match.** With
+`--pl-frac 0.5` the combined run does 284 batches x 16 = 4,544 PPI visits and 4,544 P-L visits per
+Stage-B epoch; `ppionly` does 138 x 32 = 4,416 PPI and `plonly` 142 x 32 = 4,544 P-L. So at equal
+Stage-B epochs all three models have seen each data type an equal number of times, and any
+difference is attributable to the *other* corpus being present rather than to more gradient steps.
+Stage A epochs are halved for `combined` for the same reason (it streams 2x the complexes/epoch).
+
+`plonly` is the control that tests Workstream C's actual thesis: if `combined` beats it on the
+ligand axis, PPI complementarity transferred through the shared 26-D atom space. `ppionly` is the
+control for the do-no-harm claim. Checkpoint selection uses only training-pool holdouts — the frozen
+287-complex gate is never used for selection.
+
+Estimated GPU spend: ~CHF 8-9 for all three (measured anchor CHF 0.52/GPU-hour). Jed spend to date
+~CHF 3. Running total well under the CHF 100 budget.
