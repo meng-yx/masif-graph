@@ -231,6 +231,22 @@ def build(args):
     val_set = set(val_pl)
     train_pl = [p for p in pl_clean if p not in val_set]
 
+    # --- PPI held-out monitors, carved the same way (whole protein-cluster components) ---
+    # These must NOT come from the frozen eval set: Stage A and Stage B select checkpoints on them,
+    # and selecting on the do-no-harm gate would quietly contaminate it.
+    ppi_comps = components(train_ppi, lambda c: [("seq", r) for r in per.get(c, ())])
+    rng2 = np.random.default_rng(args.seed + 1)
+    ppi_hold = []
+    for i in rng2.permutation(len(ppi_comps)):
+        if len(ppi_hold) >= args.n_val_ppi_a + args.n_val_ppi_b:
+            break
+        if len(ppi_comps[i]) <= args.max_val_component:
+            ppi_hold.extend(ppi_comps[i])
+    val_ppi_a = ppi_hold[:args.n_val_ppi_a]
+    val_ppi_b = ppi_hold[args.n_val_ppi_a:]
+    hold_set = set(ppi_hold)
+    train_ppi = [c for c in train_ppi if c not in hold_set]
+
     # --- verification against the ACTUAL train ids (the Phase-5 lesson) ---
     train_all = set(train_ppi) | {f"pl{p}" for p in train_pl}
     train_clusters = {r for c in train_all for r in per.get(c, ())}
@@ -238,21 +254,27 @@ def build(args):
     leak_val = [p for p in val_pl if per.get(f"pl{p}", set()) & train_clusters]
     train_scaf = {scaf[p] for p in train_pl if scaf.get(p)}
     val_scaf_seen = [p for p in val_pl if scaf.get(p) in train_scaf]
+    leak_ppi_hold = [c for c in ppi_hold if per.get(c, set()) & train_clusters]
     rep["verify"] = {
         "eval_ppi_leaking_into_train": len(leak_eval),
         "val_pl_protein_leaking_into_train": len(leak_val),
         "val_pl_scaffold_seen_in_train": len(val_scaf_seen),
         "val_pl_scaffold_unseen": len(val_pl) - len(val_scaf_seen),
+        "ppi_holdout_leaking_into_train": len(leak_ppi_hold),
     }
     rep["sizes"] = {"train_ppi": len(train_ppi), "train_pl": len(train_pl),
-                    "val_pl": len(val_pl), "eval_ppi": len(eval_ids)}
+                    "val_pl": len(val_pl), "val_ppi_stageA": len(val_ppi_a),
+                    "val_ppi_stageB": len(val_ppi_b), "eval_ppi": len(eval_ids)}
 
     os.makedirs(args.out, exist_ok=True)
     _w = lambda name, items: open(os.path.join(args.out, name), "w").write("\n".join(items) + "\n")
     _w("train_ppi.txt", train_ppi)
     _w("train_pl.txt", [f"pl{p}" for p in train_pl])
+    _w("train_all.txt", train_ppi + [f"pl{p}" for p in train_pl])
     _w("val_pl.txt", [f"pl{p}" for p in val_pl])
     _w("val_pl_scaffold_unseen.txt", [f"pl{p}" for p in val_pl if p not in set(val_scaf_seen)])
+    _w("val_ppi_stageA.txt", val_ppi_a)
+    _w("val_ppi_stageB.txt", val_ppi_b)
     _w("eval_ppi.txt", eval_ids)
     json.dump(rep, open(os.path.join(args.out, "split_report.json"), "w"), indent=1)
     json.dump({p: scaf.get(p) for p in pl_clean},
@@ -279,6 +301,8 @@ def main():
     ap.add_argument("--cov", type=float, default=0.5)
     ap.add_argument("--threads", type=int, default=8)
     ap.add_argument("--n-val-pl", type=int, default=300)
+    ap.add_argument("--n-val-ppi-a", type=int, default=80, help="Stage-A monitor set")
+    ap.add_argument("--n-val-ppi-b", type=int, default=160, help="mixed-val PPI half")
     ap.add_argument("--max-val-component", type=int, default=25)
     ap.add_argument("--max-component-frac", type=float, default=0.25)
     ap.add_argument("--seed", type=int, default=0)
