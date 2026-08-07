@@ -10,6 +10,8 @@ import json
 import os
 import sys
 
+import numpy as np
+
 RES = "logs/phase6C/results"
 ORDER = ["randinit", "phase5_14d", "ppionly", "plonly", "combined"]
 LABEL = {"randinit": "random-init (chance)", "phase5_14d": "Phase-5 14-D encoder",
@@ -64,23 +66,31 @@ def axis1():
 
 def axis2():
     print("### Axis 2 — mixed held-out retrieval (same-type decoy pool, centered)\n")
-    print("| model | PPI top5 | PPI medR | P-L top5 | P-L medR | P-L pocket->ligand | "
-          "P-L ligand->pocket | P-L shuffled |")
-    print("|---|---|---|---|---|---|---|---|")
+    print("| model | PPI top5 | PPI MRR | PPI medR | P-L top5 | P-L MRR | P-L medR | "
+          "P-L pocket->lig top5 | P-L lig->pocket top5 | P-L shuffled top5 |")
+    print("|---|---|---|---|---|---|---|---|---|---|")
     for t in tags():
         d = load(f"mixed_{t}.json")
         if not d:
             continue
         r = d["results"]
         g = lambda k, f="top5": r.get(k, {}).get(f, float("nan"))
-        print(f"| {LABEL.get(t, t)} | {g('ppi'):.3f} | {g('ppi','median_rank'):.0f} "
-              f"| {g('pl'):.3f} | {g('pl','median_rank'):.0f} | {g('pl_query_protein'):.3f} "
+        print(f"| {LABEL.get(t, t)} | {g('ppi'):.3f} | {g('ppi','mrr'):.3f} "
+              f"| {g('ppi','median_rank'):.0f} | {g('pl'):.3f} | {g('pl','mrr'):.3f} "
+              f"| {g('pl','median_rank'):.0f} | {g('pl_query_protein'):.3f} "
               f"| {g('pl_query_ligand'):.3f} | {g('shuffled_pl'):.3f} |")
     d = load(f"mixed_{tags()[0]}.json") if tags() else None
     if d:
         r = d["results"]
-        print(f"\nchance top5: PPI {r.get('ppi', {}).get('chance_top5')}, "
-              f"P-L {r.get('pl', {}).get('chance_top5')}.\n")
+        # median rank matters as much as top-5 here: a model can be clearly better than random
+        # while almost never landing in the top 5, and top-5 alone would read as a flat null.
+        for k, lab in (("ppi", "PPI"), ("pl", "P-L")):
+            e = r.get(k, {})
+            db = e.get("db")
+            if db:
+                print(f"- {lab}: DB {db}, chance top5 {e.get('chance_top5')}, "
+                      f"chance median rank ~{db / 2:.0f}, chance MRR ~{np.log(db) / db:.3f}")
+        print()
     for pref, title in (("mixed_scafclean_",
                          "Scaffold-unseen subset (clean on protein cluster AND ligand scaffold)"),
                         ("mixed_scafdedup_",

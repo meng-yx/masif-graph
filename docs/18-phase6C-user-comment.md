@@ -88,6 +88,14 @@ the handoff explicitly puts out of scope for C ("AF3/MSA are NOT needed here"). 
 starting it, but I am recording your rule as the design decision for it (protein varies, ligand is
 held fixed at its experimental pose) so Phase 7 does not have to re-litigate it, and I will flag it
 in the results doc's not-in-scope section.
+
+### 🧑 USER:
+No, feel free to create AF3 predictions for PDBbind targets. That was an oversight from the previous
+agent who wrote the handoff document. AF3/MSA are not the goal for this step, but you are not forbidden from
+doing so to achieve your goal. Clearly you need the apo AF3 structure to traing the model on PDBbind targets, 
+so please do it and use them for training. 
+
+
 ### C(b) complete — corpus built, split clean
 PDBbind refined **5,240/5,316** built (99.7% of non-skipped), PPI **4,711/4,871** re-featurised to
 26-D, Phase-5 eval set complete (301 holo + 284 AF3), neosurface benchmark 14/14 systems (28 cases).
