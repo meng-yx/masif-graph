@@ -306,3 +306,28 @@ a separate process, so all three pick it up uniformly.
 
 Decision: let Stage A finish rather than restart. The diagnostic that would have changed this
 decision (learned AUC at chance) came back negative.
+
+## 10. User steering (2026-08-07, answered inline in docs/18)
+
+1. **Array concurrency** — the `%220`/`%250` caps were unnecessary; the cluster handles ~500.
+   Future arrays go uncapped unless the scheduler actually pushes back.
+2. **Ligands have no apo state** — at deployment a ligand-bearing structure always comes from
+   experiment, so predicting an apo ligand conformation is meaningless. Recorded as a decision:
+   *if* a workflow ever needs a holo/apo pair per entry, the ligand is duplicated unchanged.
+
+   **This workstream does not need it.** C training is holo-only for both corpus types (Stage A and
+   Stage B read only `__holo__` npz); the positive pair is the two sides of one complex, never a
+   holo-vs-apo pair. AF3/apo appears only in the axis-1 Phase-5 gate, which is protein-protein only.
+   Axis-3 ligand geometry is the **experimental bound pose** (RCSB ModelServer instance endpoint),
+   matching the deployment assumption exactly.
+
+   Consequence for later phases: the ligand-axis robustness test (AF3-apo protein + experimental
+   ligand) is the natural Phase-7 follow-up and now has its rule fixed in advance — protein varies,
+   ligand stays at its experimental pose. Out of scope for C per the handoff.
+
+## 11. Resume (session 2) — reattached, no double-submission
+
+`squeue` on Jed: only the agent job. On Kuma, all three training children were still RUNNING
+(4026517/18/19, elapsed 1:10) — reattached rather than resubmitted. `ret_plonly_best.pt` already
+written (first checkpoint saved at Stage-B epoch 4). Random-init control gate re-run (65983164)
+completed and produced the scaffold-deduplicated variant.
