@@ -45,6 +45,14 @@ $PY -u -m masif_graph.p6.mixed_bench \
   --pl-data "$P6/npz_pl" --pl-ids "$P6/split/val_pl_scafdedup.txt" \
   --ckpt "$CKPT" --center --pos-key pos --out "$OUT/mixed_scafdedup_${TAG}.json"
 
+echo "--- axis 2d: TRAIN-set retrieval (same sizes as the holdout) ---"
+echo "    Separates 'cannot learn' from 'cannot generalise'. If train-set retrieval is high while"
+echo "    the holdout is at chance, the complementarity learned is complex-specific, not general."
+$PY -u -m masif_graph.p6.mixed_bench \
+  --ppi-data "$P6/npz_ppi" --ppi-ids "$P6/split/train_ppi_sample197.txt" \
+  --pl-data "$P6/npz_pl" --pl-ids "$P6/split/train_pl_sample300.txt" \
+  --ckpt "$CKPT" --center --pos-key pos --out "$OUT/mixedtrain_${TAG}.json"
+
 echo "=== AXIS 3: neosurface benchmark (28 ligand-induced cases) $(date) ==="
 $PY -u -m masif_graph.p6.neosurf_bench --neosurf-data "$P6/npz_neosurf" \
   --decoy-data "$P6/npz_eval" --decoy-ids logs/phase5/eval_sc304_clean_vs_enc.txt \

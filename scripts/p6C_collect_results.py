@@ -99,6 +99,22 @@ def axis2():
         print()
 
 
+def train_vs_generalise():
+    rows = [(t, load(f"mixedtrain_{t}.json"), load(f"mixed_{t}.json")) for t in tags()]
+    rows = [(t, a, b) for t, a, b in rows if a and b]
+    if not rows:
+        return
+    print("Train-set vs held-out retrieval (identical set sizes) — separates "
+          "\"cannot learn\" from \"cannot generalise\":\n")
+    print("| model | PPI train top5 | PPI held-out top5 | P-L train top5 | P-L held-out top5 |")
+    print("|---|---|---|---|---|")
+    for t, a, b in rows:
+        g = lambda d, k: d["results"].get(k, {}).get("top5", float("nan"))
+        print(f"| {LABEL.get(t, t)} | {g(a,'ppi'):.3f} | {g(b,'ppi'):.3f} "
+              f"| {g(a,'pl'):.3f} | {g(b,'pl'):.3f} |")
+    print()
+
+
 def axis3():
     print("### Axis 3 — neosurface benchmark (28 ligand-induced cases)\n")
     print("| model | with-ligand top5 | medR | no-ligand top5 | medR | ligand helps/hurts/ties |")
@@ -125,4 +141,4 @@ def axis3():
 if __name__ == "__main__":
     if len(sys.argv) > 1:
         RES = sys.argv[1]
-    axis1(); axis2(); axis3()
+    axis1(); axis2(); train_vs_generalise(); axis3()
