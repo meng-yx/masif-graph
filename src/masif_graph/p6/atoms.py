@@ -38,10 +38,9 @@ _NEG_ATOMS = {("ASP", "OD1"), ("ASP", "OD2"), ("GLU", "OE1"), ("GLU", "OE2")}
 
 
 def _elem_onehot(sym):
+    """One-hot over U_ELEMENTS with an explicit "other" slot (Se, metals, ...)."""
     v = np.zeros(len(U_ELEMENTS) + 1, np.float32)
-    v[U_ELEMENTS.index(sym)] = 1.0 if sym in U_ELEMENTS else v.__setitem__(len(U_ELEMENTS), 1.0)
-    if sym not in U_ELEMENTS:
-        v[:] = 0.0; v[len(U_ELEMENTS)] = 1.0
+    v[U_ELEMENTS.index(sym) if sym in U_ELEMENTS else len(U_ELEMENTS)] = 1.0
     return v
 
 

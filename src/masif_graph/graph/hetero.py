@@ -173,6 +173,7 @@ def build_hetero_graph(
     va_kmax: int = 8,
     max_vert: int | None = None,
     subsample_seed: int = 0,
+    unified_atom_feat: bool = False,
     _override_verts: np.ndarray | None = None,
     _override_normals: np.ndarray | None = None,
     _override_atom_coords: np.ndarray | None = None,
@@ -189,10 +190,20 @@ def build_hetero_graph(
     """
     # ---- atom side: reuse Phase-2 covalent builder (drop its spatial edges per design §4) ----
     ag = build_atom_graph(chain, surf, pdb_path)
-    chem = element_chem_features(chain.atom_element)  # (n_atom, 3) invariant element-chem
-    # atom node features: Phase-2 base(10) + flex_depth(1, normalized) + element-chem(3)
-    flex = (np.clip(ag.flex_depth, 0, 8) / 8.0).astype(np.float32)[:, None]
-    atom_feat = np.concatenate([ag.node_feat, flex, chem], axis=1).astype(np.float32)
+    if unified_atom_feat:
+        # Phase-6: the 26-D space shared with ligand atoms (p6/atoms.py) so protein<->protein
+        # complementarity can transfer to protein<->ligand. Same signals, plus hybridization /
+        # H-bond donor-acceptor / formal charge, which need atom+residue names.
+        from masif_graph.p6.atoms import protein_features
+        resnames = np.asarray([str(r).split(":")[2] for r in chain.atom_resid], dtype=object)
+        atom_feat = protein_features(chain.atom_element, chain.atom_name, resnames,
+                                     ag.node_feat[:, 7], np.rint(ag.node_feat[:, 8] * 6).astype(np.int64),
+                                     ag.is_surface, ag.flex_depth)
+    else:
+        chem = element_chem_features(chain.atom_element)  # (n_atom, 3) invariant element-chem
+        # atom node features: Phase-2 base(10) + flex_depth(1, normalized) + element-chem(3)
+        flex = (np.clip(ag.flex_depth, 0, 8) / 8.0).astype(np.float32)[:, None]
+        atom_feat = np.concatenate([ag.node_feat, flex, chem], axis=1).astype(np.float32)
     atom_coords = ag.coords.astype(np.float64)
     if _override_atom_coords is not None:
         atom_coords = _override_atom_coords.astype(np.float64)
