@@ -280,3 +280,29 @@ control for the do-no-harm claim. Checkpoint selection uses only training-pool h
 
 Estimated GPU spend: ~CHF 8-9 for all three (measured anchor CHF 0.52/GPU-hour). Jed spend to date
 ~CHF 3. Running total well under the CHF 100 budget.
+
+## 9. A collapse scare on the combined run — diagnosed, and one real bug found
+
+Watching the Stage-A diagnostic, `combined` (4026517) showed `z_std` falling 0.0083 -> 0.0031 ->
+0.0023 -> 0.0018 while the controls stayed put (`ppionly` ~0.014, `plonly` rising to 0.065). That is
+numerically the Phase-4 collapse signature (docs/10: "z_std -> 0.003 from ep1").
+
+**It is not collapse.** `p4.train` measures `z_std` on the **L2-normalised** chain-1 embeddings,
+and VICReg constrains the **raw** ones. If the raw embeddings acquire a large common mean, raw
+per-dim std can sit at the VICReg floor while the normalised vectors all point the same way — the
+Phase-4 §21 DC-offset phenomenon, which is exactly what `--center` exists to undo. The decisive
+evidence is the epoch-5 eval: combined **learned SC AUC = 0.702** against a shuffled control of
+0.501, i.e. the encoder is learning. (It is behind `ppionly` 0.824 @ep5 and `plonly` 0.925 @ep10 —
+worth reporting, not worth panicking over, since Stage B centres and does the real work.)
+
+**But the scare surfaced a genuine design hole in Stage B, now fixed.** `train_unified` applied
+VICReg to the pooled batch: `vicreg_terms(torch.cat(raws, 0))` over protein *and* ligand atoms
+together. Protein and ligand atoms are trivially separable — the `is_ligand` feature alone does it —
+so a pooled variance term is fully satisfied by **two tightly-clustered point masses sitting far
+apart**. That is precisely the collapse VICReg is there to prevent, and the pooled statistic cannot
+see it. VICReg is now computed **per type and averaged**, which forces spread *within* each type.
+All three runs were still in Stage A when the fix landed in `/work/.../phase6C/src`, and Stage B is
+a separate process, so all three pick it up uniformly.
+
+Decision: let Stage A finish rather than restart. The diagnostic that would have changed this
+decision (learned AUC at chance) came back negative.
