@@ -91,7 +91,8 @@ def run(args):
     # ---- DB: every subunit + every decoy, as a whole surface (subsampled for memory) ----
     def cap(z):
         if args.max_db_atoms and z.shape[0] > args.max_db_atoms:
-            return z[torch.tensor(np.sort(rng.choice(z.shape[0], args.max_db_atoms, False)))]
+            k = np.sort(rng.choice(z.shape[0], args.max_db_atoms, False))
+            return z[torch.as_tensor(k, dtype=torch.long, device=z.device)]
         return z
 
     dbk, mats, seg = [], [], []
@@ -100,7 +101,7 @@ def run(args):
             m = cap(emb[key])
             if m.shape[0] == 0:
                 continue
-            seg.append(torch.full((m.shape[0],), len(dbk), dtype=torch.long))
+            seg.append(torch.full((m.shape[0],), len(dbk), dtype=torch.long, device=m.device))
             mats.append(m); dbk.append(key)
     Mdb, seg = torch.cat(mats, 0), torch.cat(seg, 0)
     idx_of = {k: i for i, k in enumerate(dbk)}
@@ -111,11 +112,12 @@ def run(args):
         near = meta[s][qr]["near"]
         if len(near) == 0:
             return None
-        parts = [emb[(s, qr)][torch.tensor(near)]]
+        zq = emb[(s, qr)]
+        parts = [zq[torch.as_tensor(near, dtype=torch.long, device=zq.device)]]
         if with_ligand:
             parts.append(emb[(s, "lig")])
         q = torch.cat(parts, 0)
-        S = torch.full((q.shape[0], n_db), float("-inf"))
+        S = torch.full((q.shape[0], n_db), float("-inf"), device=q.device)
         S.scatter_reduce_(1, seg.expand(q.shape[0], -1), q @ TZ, reduce="amax", include_self=True)
         score = S.median(0).values
         score[idx_of[(s, qr)]] = float("-inf")            # never retrieve the query itself

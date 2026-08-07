@@ -57,11 +57,12 @@ def build_patches(enc, comp, recs, device="cpu", center=True, pos_key="pos", max
     rng = np.random.default_rng(seed)
     pat = {}
     for cid, kind, c in recs:
-        pos = getattr(c, pos_key).numpy().reshape(-1, 2)
+        pos = getattr(c, pos_key).detach().cpu().numpy().reshape(-1, 2)
         if max_patch and len(pos) > max_patch:
             pos = pos[rng.choice(len(pos), max_patch, replace=False)]
         i1, i2 = _u(pos[:, 0]), _u(pos[:, 1])
-        pat[cid] = {"kind": kind, "p1": emb[cid]["p1"][i1], "p2": emb[cid]["p2"][i2]}
+        gi = lambda a: torch.as_tensor(a, dtype=torch.long, device=emb[cid]["p1"].device)
+        pat[cid] = {"kind": kind, "p1": emb[cid]["p1"][gi(i1)], "p2": emb[cid]["p2"][gi(i2)]}
     return pat, z_std
 
 
@@ -70,11 +71,12 @@ def retrieve(pat, comp, same_type_db=True, shuffle=False, seed=0):
     """Rank every chain's true partner in the pooled DB. Returns list of (cid, kind, role, rank)."""
     dbk = [(c, r) for c in pat for r in ("p1", "p2") if pat[c][r].shape[0] > 0]
     idx_of = {k: i for i, k in enumerate(dbk)}
+    dev = pat[dbk[0][0]][dbk[0][1]].device
     mats, seg = [], []
     for i, (c, r) in enumerate(dbk):
         m = pat[c][r]
         mats.append(m)
-        seg.append(torch.full((m.shape[0],), i, dtype=torch.long))
+        seg.append(torch.full((m.shape[0],), i, dtype=torch.long, device=dev))
     Mdb, seg = torch.cat(mats, 0), torch.cat(seg, 0)
     TZ = comp.T @ Mdb.t()                                    # (d, Ntot)
     n_db = len(dbk)
@@ -88,7 +90,7 @@ def retrieve(pat, comp, same_type_db=True, shuffle=False, seed=0):
         if (cid, pr) not in idx_of:
             continue
         q = pat[cid][qr]
-        S = torch.full((q.shape[0], n_db), float("-inf"))
+        S = torch.full((q.shape[0], n_db), float("-inf"), device=dev)
         S.scatter_reduce_(1, seg.expand(q.shape[0], -1), q @ TZ, reduce="amax", include_self=True)
         score = S.median(0).values
         score[idx_of[(cid, qr)]] = float("-inf")             # never retrieve yourself
@@ -96,7 +98,7 @@ def retrieve(pat, comp, same_type_db=True, shuffle=False, seed=0):
             # a protein query beating a *ligand* decoy is not evidence of binder discrimination;
             # restrict the pool to the DB entries that play the same structural role.
             mask = (kinds == pat[cid]["kind"]) & (roles == pr)
-            score = score.masked_fill(~torch.tensor(mask), float("-inf"))
+            score = score.masked_fill(~torch.as_tensor(mask, device=dev), float("-inf"))
         order = torch.argsort(score, descending=True).tolist()
         true = order[rng.integers(int((score > float("-inf")).sum()))] if shuffle else idx_of[(cid, pr)]
         out.append((cid, pat[cid]["kind"], qr, order.index(true) + 1,

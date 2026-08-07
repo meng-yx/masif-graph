@@ -186,3 +186,48 @@ CPU debug run (24 PPI + 39 PL train, 20+30 val): loss 7.99 -> 7.59, in-batch tra
 0.16, z_std flat 0.163 (no collapse), |T| flat, gradients finite. **The untrained network sits at
 chance on every group** (pl top5 0.15 vs chance 0.167; ppi 0.275 vs 0.25) — the eval is not
 accidentally leaking.
+
+## 5. Kuma timing probe (job 4026331, qos=debug, CHF 0.43) + a CUDA bug it caught
+
+800-complex, 2-epoch probe of both stages on an H100.
+- **Stage A**: 2m02s for 2 epochs = ~50 s/epoch at 800 complexes -> **~16 complexes/s**; median step
+  21 ms. Learning: held-out SC learned 0.493 -> 0.772 in two epochs (frozen ceiling 0.942).
+- **Stage B**: crashed — `mixed_bench.build_patches` called `.numpy()` on a CUDA tensor. Fixed there
+  and, pre-emptively, everywhere the same pattern existed (`train_unified.iface_idx`,
+  `neosurf_bench` cap/seg/index/scatter buffers): index tensors and scatter buffers now inherit the
+  device of the tensor they touch. The standalone benches run on CPU so this only bit the GPU path.
+  **This is exactly why the probe existed** — the bug would otherwise have surfaced hours into a
+  12 h run.
+
+Cost anchors measured on Kuma: **CHF ~0.52 per GPU-hour**; a 12 h pipeline reservation estimates
+CHF 6.21. Two full runs (combined + PPI-only control) are therefore ~CHF 10, comfortably inside 100.
+
+**PPI exposure is matched between the two runs by construction.** `make_batches` sizes an epoch by
+the larger pool, so with `--pl-frac 0.5` the combined run does 276 batches x 16 PPI = 4,416 PPI
+visits/epoch, and the PPI-only control does 138 batches x 32 = 4,416. The combined run costs ~2x the
+wall clock per epoch because it additionally does 4,416 protein-ligand visits.
+
+## 6. Random-init control gate (job 65982979) — the eval harness is sound
+
+Ran all three axes with an **untrained** 26-D encoder, both as a pipeline de-risk and as the chance
+line for the results doc.
+
+**The important result is the frozen column.** On the re-featurized 26-D eval npz the frozen MaSIF
+baseline reproduces the Phase-5 published numbers *exactly*:
+
+| cell | this run (26-D npz) | Phase-5 `gate_fullclean_pos.json` |
+|---|---|---|
+| HH_frozen top5 / medRank | 0.084 / 110 | 0.084 / 110 |
+| AA_frozen top5 / medRank | 0.061 / 128 | 0.061 / 128 |
+| n / DB | 269 / 538 | 269 / 538 |
+
+Identical to three decimals on the same denominators. So the `atom_feat` patch left the descriptors,
+interface definitions and AF3 join untouched, and the do-no-harm gate is directly comparable to the
+Phase-5 bar: **HH_learned top5 = 0.630, AA_learned top5 = 0.639**.
+
+The untrained learned encoder sits at the shuffled-control line (top5 0.009-0.015 vs shuffled 0.011),
+and on the neosurface axis it scores exactly chance (medRank 44/108, ligand effect 14 better /
+14 worse). Both controls behave.
+
+Also fixed: `p6C_gate.sbatch` died 8 s in (job 65982977) because `set -u` plus conda's gromacs
+deactivate hook dereferences unset variables. The gate now calls the env's interpreter directly.

@@ -49,3 +49,11 @@ every reported group — the eval is not leaking. Next: cluster-clean split, the
 In the future, you do not have to limit the concurrency to 250 parallel array jobs. The cluster should be 
 able to handle 500 concurrent jobs. Only use concurrency if you encounter an issue with too many concurrent
 jobs. 
+
+A note on how to deal with ligand in holo-apo mapping: unlike proteins which has either holo conformation
+from the experimental PDB structure or AF3-predicted apo conformation, ligands won't have an apo conformation.
+There is no point in AI predicting the conformation of a ligand, because at deployment we expect ligand-
+containing structure (if used) will always come from experimentally determined structures. For training, 
+if you need an apo structure for ligand for being balanced (you make a decision based on whether the training
+workflow always need pairs of holo vs apo structure for each entry), I guess you can just use the same ligand
+structure as both apo and holo. 

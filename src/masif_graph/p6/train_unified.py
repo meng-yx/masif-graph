@@ -67,8 +67,8 @@ def iface_idx(pos, col, max_patch, rng):
         return torch.zeros(0, dtype=torch.long)
     idx = torch.unique(pos[:, col])
     if max_patch and idx.numel() > max_patch:
-        keep = rng.choice(idx.numel(), max_patch, replace=False)
-        idx = idx[torch.tensor(np.sort(keep))]
+        keep = np.sort(rng.choice(idx.numel(), max_patch, replace=False))
+        idx = idx[torch.as_tensor(keep, dtype=torch.long, device=idx.device)]
     return idx
 
 
