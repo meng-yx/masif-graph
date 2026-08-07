@@ -1,7 +1,8 @@
 # Phase 6 — Workstream C — results: a ligand-capable unified retrieval encoder
 
-> Status: **IN PROGRESS** (this document is filled as each axis lands; every number below is
-> traceable to a committed artefact under `logs/phase6C/results/` and a command in §7).
+> Status: **COMPLETE** (2026-08-07). Every number below is traceable to a committed artefact under
+> `logs/phase6C/results/` and a command in §7. Total compute: **~CHF 7.5** of a CHF 100 budget
+> (Jed 292 core-hours ≈ CHF 1.46; Kuma 11.6 GPU-hours ≈ CHF 6.05).
 
 ## 0. What was asked, and what "done" means
 Retrain the from-scratch invariant encoder on a **combined corpus** — PPI complexes **+**
@@ -144,13 +145,157 @@ to the right cause:
 ---
 
 ## 4. Axis 1 — do-no-harm PPI gate
-*(pending)*
+
+### Axis 1 — do-no-harm PPI gate (Phase-5 287-clean, dense `pos` patches)
+
+| model | HH top5 | HH medR | AA top5 | AA medR | holo->AA drop | shuffled top5 |
+|---|---|---|---|---|---|---|
+| random-init (chance) | 0.015 | 258 | 0.009 | 253 | +0.006 | 0.011 |
+| Phase-5 14-D encoder | 0.630 | 1 | 0.639 | 1 | -0.009 | 0.011 |
+| 26-D PPI-only (control) | 0.651 | 1 | 0.660 | 1 | -0.009 | 0.011 |
+| 26-D ligand-only (control) | 0.011 | 262 | 0.013 | 258 | -0.002 | 0.011 |
+| 26-D COMBINED (deliverable) | 0.610 | 1 | 0.623 | 1 | -0.013 | 0.011 |
+| *frozen MaSIF (same patches)* | 0.084 | 110 | 0.061 | 128 | +0.022 | 0.011 |
+
+n = 269 complexes, DB = 538 chains (chance top5 ~ 0.0093).
+
+**Reading.** The 26-D feature space is itself a small *gain*: the PPI-only 26-D control (0.651 / 0.660)
+sits **above** the Phase-5 14-D encoder (0.630 / 0.639). Against that, the combined model gives back
+some of it — **0.610 / 0.623**, i.e. **−0.020 / −0.016 vs the Phase-5 anchor** and **−0.041 / −0.037 vs
+the matched 26-D PPI-only control**.
+
+Is that "meaningful"? The Workstream-B seed spread on this metric was **±0.04** (1500-complex pairs:
+0.613 vs 0.569), and each condition here is **one seed** — so the gap versus the Phase-5 anchor is
+comfortably inside seed noise, and the gap versus the matched control is about one seed spread. Read
+conservatively: **a small but probably real cost, not a collapse.** Median rank stays **1**, the model
+remains ~7× frozen MaSIF (0.084), and conformational robustness is untouched — the holo→AF3-apo drop
+is −0.013 (negative: AF3 slightly *better* than holo), matching both controls.
+
+The ligand-only control lands at chance (0.011 / 0.013), which is the sanity check that this gate
+measures PPI ability and nothing else.
+
 
 ## 5. Axis 2 — mixed held-out retrieval
-*(pending)*
+
+### Axis 2 — mixed held-out retrieval (same-type decoy pool, centered)
+
+| model | PPI top5 | PPI MRR | PPI medR | P-L top5 | P-L MRR | P-L medR | P-L pocket->lig top5 | P-L lig->pocket top5 | P-L shuffled top5 |
+|---|---|---|---|---|---|---|---|---|---|
+| random-init (chance) | 0.028 | 0.032 | 98 | 0.012 | 0.019 | 138 | 0.014 | 0.010 | 0.014 |
+| 26-D PPI-only (control) | 0.602 | 0.590 | 1 | 0.021 | 0.025 | 148 | 0.021 | 0.021 | 0.014 |
+| 26-D ligand-only (control) | 0.028 | 0.036 | 100 | 0.036 | 0.036 | 116 | 0.045 | 0.027 | 0.014 |
+| 26-D COMBINED (deliverable) | 0.576 | 0.542 | 2 | 0.040 | 0.042 | 76 | 0.041 | 0.038 | 0.014 |
+- PPI: DB 198, chance top5 0.0254, chance median rank ~99, chance MRR ~0.027
+- P-L: DB 292, chance top5 0.0172, chance median rank ~146, chance MRR ~0.019
+
+Scaffold-unseen subset (clean on protein cluster AND ligand scaffold):
+
+| model | P-L top5 | P-L top1 | P-L medR | n | chance top5 |
+|---|---|---|---|---|---|
+| random-init (chance) | 0.008 | 0.000 | 98 | 382 | 0.0262 |
+| 26-D PPI-only (control) | 0.024 | 0.008 | 94 | 382 | 0.0262 |
+| 26-D ligand-only (control) | 0.042 | 0.005 | 77 | 382 | 0.0262 |
+| 26-D COMBINED (deliverable) | 0.063 | 0.010 | 54 | 382 | 0.0262 |
+
+Scaffold-deduplicated holdout (one complex per scaffold; removes the congeneric-decoy ambiguity that depresses top-1):
+
+| model | P-L top5 | P-L top1 | P-L medR | n | chance top5 |
+|---|---|---|---|---|---|
+| random-init (chance) | 0.009 | 0.000 | 108 | 422 | 0.0237 |
+| 26-D PPI-only (control) | 0.021 | 0.005 | 107 | 422 | 0.0237 |
+| 26-D ligand-only (control) | 0.045 | 0.014 | 83 | 422 | 0.0237 |
+| 26-D COMBINED (deliverable) | 0.066 | 0.009 | 56 | 422 | 0.0237 |
+
+Train-set vs held-out retrieval (identical set sizes) — separates "cannot learn" from "cannot generalise":
+
+| model | PPI train top5 | PPI held-out top5 | P-L train top5 | P-L held-out top5 |
+|---|---|---|---|---|
+| 26-D PPI-only (control) | 0.464 | 0.602 | 0.029 | 0.021 |
+| 26-D ligand-only (control) | 0.028 | 0.028 | 0.041 | 0.036 |
+| 26-D COMBINED (deliverable) | 0.429 | 0.576 | 0.095 | 0.040 |
+
+
+
+**Reading — this is where the workstream's thesis is decided.**
+
+*Protein–ligand retrieval is real but weak, and it is driven by the PPI data.* Across all three
+holdout variants the ordering is identical and the margins are not small:
+
+| holdout variant | chance medR | ppionly | plonly | **combined** |
+|---|---|---|---|---|
+| full (n=292 DB) | ~146 | 148 | 116 | **76** |
+| scaffold-unseen (clean on both axes) | ~98 | 94 | 77 | **54** |
+| scaffold-deduplicated | ~108 | 107 | 83 | **56** |
+
+The **transfer hypothesis is supported**: the combined model roughly **doubles** the ligand-retrieval
+signal of the ligand-only model (full holdout: 146→76 rank improvement vs 146→116), and PPI-only
+training gives exactly nothing on ligands (148 ≈ chance 146). Two confounds were checked and both run
+*against* this conclusion, so it is if anything understated:
+* Stage-B protein–ligand exposure is **equal** by construction (§3), and the combined run's in-batch
+  same-type decoy pool is *smaller* (16 ligands vs 32) — i.e. **easier** negatives than `plonly` got.
+* Stage-A pretraining exposure is matched in total complex-visits (15 × 8,964 ≈ 30 × 4,546).
+
+*But the absolute level is low.* Top-5 is 0.04–0.07 against a 0.02–0.03 chance line. This is a real
+signal, **not a deployable virtual-screening retriever** — a median rank of 54 out of a 192-chain pool is far from
+"find the binder".
+
+**The train-vs-held-out diagnostic explains why, and rules out the boring explanation.** `plonly`
+scores 0.041 on *training* complexes vs 0.036 held out — it never learned the task even on data it
+saw, so its weakness is not overfitting. `combined` scores 0.095 train vs 0.040 held out: PPI data
+more than doubles even the **training-set** fit, so it is teaching genuinely better complementarity
+features rather than acting as a regulariser. The remaining train→held-out gap is the generalisation
+limit at this corpus size.
+
+*One oddity, explained:* PPI train-set retrieval (0.429–0.464) is **lower** than PPI held-out
+(0.576–0.602). That is a property of the split, not a bug — holdouts were carved as *small* cluster
+components (≤25), while the training pool keeps the giant components (largest 3,269), so training
+complexes have far more confusable homologs in their own decoy pool.
+
+**Selection caveat (stated, not hidden):** the checkpoint was selected on this same held-out set, so
+these are the best of 8 evaluated epochs. The selection-free **final-epoch** numbers from the training
+history are essentially identical — combined ligand medR 74 (vs 76 selected), PPI top5 0.571 (vs
+0.576); `ppionly` PPI MRR 0.589 final vs 0.590 selected — because every curve had plateaued. Axis 1
+and axis 3 are unaffected: neither was ever used for selection.
 
 ## 6. Axis 3 — neosurface benchmark
-*(pending)*
+
+### Axis 3 — neosurface benchmark (28 ligand-induced cases)
+
+| model | with-ligand top5 | medR | no-ligand top5 | medR | ligand helps/hurts/ties |
+|---|---|---|---|---|---|
+| random-init (chance) | 0.000 | 262 | 0.000 | 257 | 12/16/0 |
+| 26-D PPI-only (control) | 0.000 | 236 | 0.071 | 294 | 14/14/0 |
+| 26-D ligand-only (control) | 0.000 | 253 | 0.036 | 258 | 10/18/0 |
+| 26-D COMBINED (deliverable) | 0.036 | 267 | 0.036 | 297 | 17/11/0 |
+| *frozen MaSIF (ligand-blind by construction)* | n/a | n/a | 0.000 | 308 | n/a |
+
+DB = 596 chains (568 held-out decoy chains), n = 28 cases, chance top5 = 0.0084.
+
+
+
+**Reading — this axis is a NEGATIVE result, and the negative includes the published method.**
+
+Nothing here beats chance. With DB = 596 whole chain surfaces, chance median rank is ~298; the models
+land at 236–297 and **frozen MaSIF lands at 308**, i.e. no better than random either. Top-5 is 0.000–0.071
+against a chance line of 0.0084 — on n=28 that is one or two lucky cases, not a capability.
+
+The ligand-present vs ligand-absent contrast — the test of whether any *neosurface* signal exists — is
+also inconclusive. The combined model improves on 17 of 28 cases and worsens on 11 (median rank 267
+with the drug vs 297 without); under a coin-flip null that is p ≈ 0.17. Suggestive at best.
+
+**Honest attribution of the null.** Three reasons this benchmark cannot presently decide the question,
+in decreasing order of how much I trust them:
+1. **n = 28 against a 596-chain database.** The benchmark is under-powered by construction; the
+   published protocol uses 28 + 200 decoys, and even there per-system reporting is the norm.
+2. **The query is deliberately oracle-free** — the patch is defined by the drug alone and DB entries are
+   whole surfaces, because that is what deployment has. This is a much harder setting than the axis-1/2
+   protocols, which use interface patches on both sides.
+3. **Path B gives the drug no shape channel.** The ligand contributes chemistry and connectivity but no
+   MSMS surface, which is precisely the geometric complementarity a *neosurface* is made of.
+
+That frozen MaSIF also fails here is worth stating plainly: it means this is a hard benchmark under
+this protocol, not a specific failure of the learned encoder. It does **not** license any claim that
+the learned encoder is better — both are at chance, and "equally at chance" is not a win.
 
 ## 7. Reproduction
 
@@ -189,7 +334,40 @@ python scripts/p6C_collect_results.py          # regenerates the tables above fr
 ```
 
 ## 8. Verdict
-*(pending)*
+
+**The deliverable exists and is verified: a single 26-D encoder trained on 4,418 PPI + 4,546
+protein–ligand complexes, cluster-clean on both leakage axes, evaluated on three axes with four
+controls (random-init, PPI-only, ligand-only, and the Phase-5 14-D encoder).** Per axis:
+
+| axis | verdict |
+|---|---|
+| **1. Do-no-harm PPI gate** | **PASS, with a small measured cost.** 0.610 / 0.623 vs the Phase-5 anchor 0.630 / 0.639 (inside the ±0.04 seed spread) and vs the matched 26-D PPI-only control 0.651 / 0.660 (≈ one seed spread). Median rank 1; conformational robustness preserved; ~7× frozen MaSIF. |
+| **2. Mixed held-out** | **NEW CAPABILITY DEMONSTRATED, WEAK. Transfer hypothesis SUPPORTED.** Ligand retrieval is well above chance (scaffold-unseen median rank 54 of 192 vs chance 96 (measured 98)) and the combined model roughly doubles the ligand-only model's signal, while PPI-only training gives exactly chance. Absolute level is far from deployable. |
+| **3. Neosurface benchmark** | **NEGATIVE / INCONCLUSIVE.** No model beats chance at DB=596, **including frozen MaSIF** (median rank 308 vs chance ~298). The ligand-present contrast is 17/11 (p≈0.17). n=28 is under-powered; this benchmark cannot presently decide the question. |
+
+### What this does and does not license
+
+**It licenses:** the claim that a *single* encoder in a *shared atom feature space* can carry both
+protein–protein and protein–ligand complementarity, and that the protein–protein data measurably
+improves the protein–ligand side. That is the mechanism Workstream C was built to test, and it is the
+first positive result for the shared-chemistry axis (the four earlier nulls were about the atom
+*graph* adding conformational robustness — a different claim, so there is no contradiction).
+
+**It does not license:** any deployment claim for neosurface or molecular-glue binder search. Axis 3
+is a null, axis 2's absolute numbers are far below usable, and one seed per condition is thin.
+
+### Honest statement of scope
+*The pipeline ran* — 5,240 PDBbind complexes preprocessed, 3 GPU runs, 3 axes, 4 controls, zero
+leakage on all three counters, controls at chance, harness reproducing Phase-5 exactly. *The result is
+valid* for axes 1 and 2 within the stated seed caveat. *The result is not established* for axis 3.
+
+### If this is continued, in priority order
+1. **Give the ligand a shape channel.** Path B's missing MSMS surface is the most plausible cause of
+   the axis-3 null and the low axis-2 ceiling — a from-scratch ligand-surface tier reusing
+   `computeMSMS` (which works) plus RDKit Gasteiger charges is the stretch goal already scoped.
+2. **≥2 seeds per condition** before treating the −0.04 do-no-harm gap as real.
+3. **A bigger neosurface benchmark** (MolGlueDB's 114 ternaries) — n=28 cannot resolve this effect.
+4. **Ligand-axis robustness** (AF3-apo protein + experimental ligand), with the rule already fixed in §9.
 
 ## 9. Explicitly NOT in scope here (and one decision recorded for later)
 

@@ -379,3 +379,41 @@ chance median rank ~146, chance MRR ~0.019). So the selected checkpoint (ep 12, 
 signal — clearly better than chance on median rank, but almost never top-5. The combined run's
 ligand median rank at a comparable epoch is *better* than `plonly`'s (78 vs 111), which is the first
 positive sign for the transfer hypothesis. Waiting for both runs to finish before concluding.
+
+## 14. RESULTS (all three runs finished 2026-08-07 20:23) — verified against artefacts
+
+| model | axis 1 HH / AA (frozen 287 gate) | axis 2 P-L medR (scaffold-unseen, chance 96) | axis 3 neosurface medR (chance ~298) |
+|---|---|---|---|
+| random-init | 0.015 / 0.009 | 98 | 262 |
+| Phase-5 14-D anchor | 0.630 / 0.639 | n/a (14-D) | n/a |
+| 26-D PPI-only | **0.651 / 0.660** | 94 | 236 |
+| 26-D ligand-only | 0.011 / 0.013 | 77 | 253 |
+| **26-D COMBINED** | 0.610 / 0.623 | **54** | 267 |
+| frozen MaSIF | 0.084 / 0.061 | n/a | 308 |
+
+Self-verified: every gate ran at n=269 / DB=538 with the correct `src` checkpoint; the frozen
+neosurface number (308) is byte-identical across all four runs, confirming it is model-independent
+as claimed.
+
+**Three verdicts** (full reasoning in `docs/19-phase6C-results.md`):
+1. **Do-no-harm: PASS with a small measured cost.** Combined 0.610/0.623 — inside the ±0.04
+   Workstream-B seed spread of the Phase-5 anchor, ~one seed spread below the matched 26-D PPI-only
+   control. Median rank 1, robustness preserved (holo→AF3 drop −0.013), ~7x frozen MaSIF.
+   Note the 26-D space is itself a small *gain*: PPI-only 26-D (0.651) > Phase-5 14-D (0.630).
+2. **Mixed held-out: new capability demonstrated but weak; TRANSFER HYPOTHESIS SUPPORTED.**
+   Combined roughly doubles the ligand-only model's ligand signal (146→76 vs 146→116 on the full
+   holdout; 96→54 vs 96→77 scaffold-unseen), while PPI-only training is exactly at chance. Both
+   confounds run *against* this: Stage-B ligand exposure is equal and combined's in-batch ligand
+   decoys are *easier* (16 vs 32). The train-vs-held-out diagnostic rules out the boring reading —
+   `plonly` scores 0.041 train / 0.036 held out (never learned it), `combined` 0.095 / 0.040 (PPI
+   data more than doubles even the training-set fit). Absolute level is far from deployable.
+3. **Neosurface: NEGATIVE / INCONCLUSIVE.** Nothing beats chance at DB=596 — **including frozen
+   MaSIF** (308 vs chance ~298). Ligand-present vs absent is 17/11 for combined (p~0.17). n=28 is
+   under-powered; the query is deliberately oracle-free; and Path B gives the drug no shape channel.
+
+**Spend: ~CHF 7.5 of 100** — Jed 292 core-h (CHF 1.46), Kuma 11.6 GPU-h (CHF 6.05: probe 0.05,
+combined 5.49, ppionly 3.30, plonly 2.80).
+
+### RESUME STATE — WORKSTREAM C COMPLETE
+All of C(a)/C(b)/C(c) done and self-verified; `docs/19-phase6C-results.md` written with per-axis
+verdicts, controls, spread and caveats; `logs/PHASE6C_DONE` touched. No jobs running.
