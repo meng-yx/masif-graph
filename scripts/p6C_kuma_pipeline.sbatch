@@ -12,7 +12,7 @@
 #SBATCH --qos=normal
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-task=16
-#SBATCH --mem=120G
+#SBATCH --mem=90G
 #SBATCH --time=12:00:00
 #SBATCH --output=/work/upthomae/Meng/phase6C/logs/train_%x_%j.out
 

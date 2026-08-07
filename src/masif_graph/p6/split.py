@@ -198,54 +198,61 @@ def build(args):
     n_scaf = len({s for s in scaf.values() if s})
     rep["pl_distinct_scaffolds"] = n_scaf
 
-    def keys_both(p):
-        ks = [("seq", r) for r in per.get(f"pl{p}", ())]
-        if scaf.get(p):
-            ks.append(("scaf", scaf[p]))
+    # Components MUST span both corpora. Carving PL holdouts from PL-only components (and PPI
+    # holdouts from PPI-only components) leaks: a PDBbind target and a PPI chain routinely land in
+    # the same sequence cluster, and a per-corpus component graph cannot see that edge. The first
+    # run of this builder did exactly that and the verify step caught 203/300 leaking val_pl.
+    pool = list(train_ppi) + [f"pl{p}" for p in pl_clean]
+
+    def keys_both(cid):
+        ks = [("seq", r) for r in per.get(cid, ())]
+        s = scaf.get(cid[2:]) if cid.startswith("pl") else None
+        if s:
+            ks.append(("scaf", s))
         return ks
 
-    def keys_seq(p):
-        return [("seq", r) for r in per.get(f"pl{p}", ())]
+    def keys_seq(cid):
+        return [("seq", r) for r in per.get(cid, ())]
 
-    comp_both = components(pl_clean, keys_both)
+    comp_both = components(pool, keys_both)
     biggest = max((len(c) for c in comp_both), default=0)
-    rep["pl_components_both"] = {"n": len(comp_both), "largest": biggest,
-                                 "largest_frac": round(biggest / max(len(pl_clean), 1), 3)}
-    if biggest <= args.max_component_frac * len(pl_clean):
+    rep["components_both"] = {"n": len(comp_both), "largest": biggest,
+                              "largest_frac": round(biggest / max(len(pool), 1), 3)}
+    if biggest <= args.max_component_frac * len(pool):
         comps, rule = comp_both, "protein-cluster OR ligand-scaffold"
     else:
-        comps = components(pl_clean, keys_seq)
+        # Scaffold edges chain components together (A~scaffold~B~protein~C ...) until one component
+        # swallows most of the corpus. Fall back to protein clusters and report scaffold overlap
+        # explicitly instead of pretending it is controlled.
+        comps = components(pool, keys_seq)
         rule = "protein-cluster only (scaffold graph degenerate; scaffold overlap reported instead)"
-        rep["pl_components_seq"] = {"n": len(comps),
-                                    "largest": max((len(c) for c in comps), default=0)}
-    rep["pl_split_rule"] = rule
+        rep["components_seq"] = {"n": len(comps),
+                                 "largest": max((len(c) for c in comps), default=0)}
+    rep["split_rule"] = rule
 
+    # Assign WHOLE components to holdout until both quotas are met; everything else trains. Because
+    # the unit of assignment is a component, no cluster can straddle the train/holdout boundary.
     rng = np.random.default_rng(args.seed)
-    order = rng.permutation(len(comps))
-    val_pl, target = [], args.n_val_pl
-    for i in order:
-        if len(val_pl) >= target:
+    n_ppi_want = args.n_val_ppi_a + args.n_val_ppi_b
+    val_pl, val_ppi = [], []
+    hold = set()
+    for i in rng.permutation(len(comps)):
+        c = comps[i]
+        if len(c) > args.max_val_component:
+            continue
+        n_pl_c = sum(x.startswith("pl") for x in c)
+        n_ppi_c = len(c) - n_pl_c
+        if (n_pl_c and len(val_pl) < args.n_val_pl) or (n_ppi_c and len(val_ppi) < n_ppi_want):
+            hold.update(c)
+            val_pl.extend(x[2:] for x in c if x.startswith("pl"))
+            val_ppi.extend(x for x in c if not x.startswith("pl"))
+        if len(val_pl) >= args.n_val_pl and len(val_ppi) >= n_ppi_want:
             break
-        if len(comps[i]) <= args.max_val_component:
-            val_pl.extend(comps[i])
-    val_set = set(val_pl)
-    train_pl = [p for p in pl_clean if p not in val_set]
-
-    # --- PPI held-out monitors, carved the same way (whole protein-cluster components) ---
-    # These must NOT come from the frozen eval set: Stage A and Stage B select checkpoints on them,
-    # and selecting on the do-no-harm gate would quietly contaminate it.
-    ppi_comps = components(train_ppi, lambda c: [("seq", r) for r in per.get(c, ())])
-    rng2 = np.random.default_rng(args.seed + 1)
-    ppi_hold = []
-    for i in rng2.permutation(len(ppi_comps)):
-        if len(ppi_hold) >= args.n_val_ppi_a + args.n_val_ppi_b:
-            break
-        if len(ppi_comps[i]) <= args.max_val_component:
-            ppi_hold.extend(ppi_comps[i])
-    val_ppi_a = ppi_hold[:args.n_val_ppi_a]
-    val_ppi_b = ppi_hold[args.n_val_ppi_a:]
-    hold_set = set(ppi_hold)
-    train_ppi = [c for c in train_ppi if c not in hold_set]
+    val_ppi_a = val_ppi[:args.n_val_ppi_a]
+    val_ppi_b = val_ppi[args.n_val_ppi_a:]
+    train_pl = [p for p in pl_clean if f"pl{p}" not in hold]
+    train_ppi = [c for c in train_ppi if c not in hold]
+    ppi_hold = val_ppi
 
     # --- verification against the ACTUAL train ids (the Phase-5 lesson) ---
     train_all = set(train_ppi) | {f"pl{p}" for p in train_pl}

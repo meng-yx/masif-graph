@@ -44,3 +44,8 @@ PDBbind refined 5,316 (array 65982574), PPI 26-D refeat 4,871 (65982545), Phase-
 ### C(b).2 / C(c).1 — split + training code written, CPU debug run green
 Loss decreasing, no collapse (z_std flat), and the *untrained* network sits exactly at chance on
 every reported group — the eval is not leaking. Next: cluster-clean split, then the Kuma retrain.
+
+### 🧑 USER:
+In the future, you do not have to limit the concurrency to 250 parallel array jobs. The cluster should be 
+able to handle 500 concurrent jobs. Only use concurrency if you encounter an issue with too many concurrent
+jobs. 
