@@ -1,0 +1,62 @@
+{
+ "args": {
+  "ppi_ids": "logs/phase6C/final_ppi.txt",
+  "pl_ids": "logs/phase6C/final_pl.txt",
+  "eval_ids": "/scratch/ymeng/masif-graph/logs/phase5/eval_sc304_clean_vs_enc.txt",
+  "ppi_fasta": "/scratch/ymeng/masif-graph/logs/phase5/all_chains.fasta",
+  "chain_pdb_dir": "/scratch/ymeng/masif-graph/masif-neosurf-af2/masif/data/masif_ppi_search/data_preparation/01-benchmark_pdbs",
+  "pdbbind": "/scratch/ymeng/masif-graph/data/pdbbind",
+  "workdir": "logs/phase6C/split_work",
+  "out": "logs/phase6C/split",
+  "min_seq_id": 0.3,
+  "cov": 0.5,
+  "threads": 8,
+  "n_val_pl": 300,
+  "n_val_ppi_a": 80,
+  "n_val_ppi_b": 160,
+  "max_val_component": 25,
+  "max_component_frac": 0.25,
+  "seed": 0
+ },
+ "fasta": {
+  "ppi_records": 12211,
+  "pl_records": 5240
+ },
+ "n_clustered_complexes": 11131,
+ "n_clusters": 4702,
+ "eval_ids": 287,
+ "eval_with_sequence": 287,
+ "forbidden_clusters": 335,
+ "ppi_in": 4711,
+ "ppi_train_after_eval_filter": 4695,
+ "ppi_dropped_homologous_to_eval": 16,
+ "pl_in": 5240,
+ "pl_after_eval_filter": 4846,
+ "pl_dropped_homologous_to_eval": 394,
+ "pl_distinct_scaffolds": 2326,
+ "components_both": {
+  "n": 2382,
+  "largest": 5855,
+  "largest_frac": 0.614
+ },
+ "components_seq": {
+  "n": 2879,
+  "largest": 3269
+ },
+ "split_rule": "protein-cluster only (scaffold graph degenerate; scaffold overlap reported instead)",
+ "verify": {
+  "eval_ppi_leaking_into_train": 0,
+  "val_pl_protein_leaking_into_train": 0,
+  "val_pl_scaffold_seen_in_train": 102,
+  "val_pl_scaffold_unseen": 198,
+  "ppi_holdout_leaking_into_train": 0
+ },
+ "sizes": {
+  "train_ppi": 4418,
+  "train_pl": 4546,
+  "val_pl": 300,
+  "val_ppi_stageA": 80,
+  "val_ppi_stageB": 197,
+  "eval_ppi": 287
+ }
+}

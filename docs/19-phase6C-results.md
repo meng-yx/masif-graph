@@ -1,7 +1,8 @@
 # Phase 6 — Workstream C — results: a ligand-capable unified retrieval encoder
 
 > Status: **COMPLETE** (2026-08-07). Every number below is traceable to a committed artefact under
-> `logs/phase6C/results/` and a command in §7. Total compute: **~CHF 7.5** of a CHF 100 budget
+> `logs/phase6C/results/` (force-added to git despite the `logs/` ignore rule, and mirrored to
+> `/work/upthomae/Meng/phase6C/results/` so a /scratch cleanup cannot take them) and a command in §7. Total compute: **~CHF 7.5** of a CHF 100 budget
 > (Jed 292 core-hours ≈ CHF 1.46; Kuma 11.6 GPU-hours ≈ CHF 6.05).
 
 ## 0. What was asked, and what "done" means
