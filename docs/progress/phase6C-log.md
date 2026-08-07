@@ -353,3 +353,29 @@ the DB is 596 whole chain surfaces and the query is a small drug-proximal patch.
 Also fixed while here: `save_protein_npz` was hardcoding zero descriptors instead of writing the
 mean-pooled ones from `surf.emb_straight`, which would have silently disabled any frozen comparison
 on these artefacts.
+
+## 13. A selection-leakage caveat on axis 2, and how it is handled
+
+`train_unified` selects its checkpoint on held-out **mixed** MRR — i.e. on `val_pl.txt` /
+`val_ppi_stageB.txt`. Those are exactly the sets axis 2 reports on, so the axis-2 number for the
+*selected* checkpoint is the best of 8 evaluated epochs on the same data. That is the Phase-4
+best-epoch auto-verdict trap in miniature.
+
+It does **not** touch axis 1 or axis 3: the frozen 287-complex gate and the neosurface benchmark
+were never used for selection (this is why the PPI monitors were carved out of the *training* pool
+in the first place, §7).
+
+Handling: axis 2 reports **both**
+* the **final-epoch** held-out numbers, taken from the training history — selection-free, and
+* the **selected-checkpoint** numbers from the gate run, which additionally give the scaffold-unseen
+  / scaffold-deduplicated variants and the train-vs-held-out diagnostic.
+
+For `plonly` the gap is small — the held-out P-L curve is flat from epoch 12 on
+(median rank 132 → 117 → 116 → 108 → 108 → 110 → 107 → 111 across epochs 4…32; MRR 0.025 → 0.029,
+chance median rank ~146, chance MRR ~0.019). So the selected checkpoint (ep 12, MRR 0.036) is
+~+0.007 MRR above the plateau. Small, but stated rather than hidden.
+
+**Reading so far (not yet the verdict):** ligand-only training produces a real but weak held-out
+signal — clearly better than chance on median rank, but almost never top-5. The combined run's
+ligand median rank at a comparable epoch is *better* than `plonly`'s (78 vs 111), which is the first
+positive sign for the transfer hypothesis. Waiting for both runs to finish before concluding.
