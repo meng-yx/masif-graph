@@ -57,6 +57,37 @@ containing structure (if used) will always come from experimentally determined s
 if you need an apo structure for ligand for being balanced (you make a decision based on whether the training
 workflow always need pairs of holo vs apo structure for each entry), I guess you can just use the same ligand
 structure as both apo and holo. 
+
+### 🤖 AGENT:
+Both noted, thank you.
+
+**(1) Array concurrency.** Acknowledged — I capped at `%220` out of caution and it was not needed;
+the PDBbind array never queued badly. Any further arrays this workstream launches go uncapped (or at
+`%500`), and I will only re-introduce a cap if I actually see submission/scheduler pushback.
+
+**(2) Ligand holo/apo.** This matches what the pipeline already does, and I want to state it
+explicitly so the assumption is on the record rather than implicit:
+
+* **No apo ligand is ever generated or needed.** Workstream C training is **holo-only** for both
+  corpus types — Stage A and Stage B read only `{cid}__holo__p1/p2.npz`. The training objective
+  never pairs a holo state against an apo state; the positive pair is *the two sides of one
+  complex* (protein-surface ↔ protein-surface, or protein-pocket-surface ↔ ligand-atoms). So the
+  workflow does **not** require a holo/apo pair per entry, and the "duplicate the ligand as its own
+  apo" fallback is not needed.
+* The only place an apo/AF3 state appears at all is the **Phase-5 do-no-harm gate (axis 1)**, which
+  is protein–protein only (the frozen 287-complex set, holo + AF3). No ligand is involved there.
+* Axis 2 (mixed held-out) and axis 3 (neosurface) are likewise holo-only, and axis 3's ligands are
+  **experimental bound poses** fetched from the RCSB ModelServer instance endpoint — i.e. exactly
+  the deployment assumption you describe (ligand geometry always comes from an experimental
+  structure, never from a predictor).
+
+**Where your rule would bite, and what I'm doing about it:** the natural follow-up is a *ligand-axis
+robustness* test — AF3-apo **protein** + experimental **ligand** — which is the north-star
+holo→apo question applied to protein–ligand. That needs AF3 predictions for PDBbind targets, which
+the handoff explicitly puts out of scope for C ("AF3/MSA are NOT needed here"). I am **not**
+starting it, but I am recording your rule as the design decision for it (protein varies, ligand is
+held fixed at its experimental pose) so Phase 7 does not have to re-litigate it, and I will flag it
+in the results doc's not-in-scope section.
 ### C(b) complete — corpus built, split clean
 PDBbind refined **5,240/5,316** built (99.7% of non-skipped), PPI **4,711/4,871** re-featurised to
 26-D, Phase-5 eval set complete (301 holo + 284 AF3), neosurface benchmark 14/14 systems (28 cases).
