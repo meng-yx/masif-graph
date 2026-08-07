@@ -29,3 +29,23 @@ pocket-surface <-> ligand-atoms (contact); deployment neosurface query = protein
 ligand-atom embeddings. Gives up ligand-derived surface vertices (shape) but keeps the atom-level
 protein<->ligand complementarity (the core goal). Robust + self-contained.
 ## RESUME STATE: C(a).3 Path B — build protein surface for a PDBbind complex (normal .sif) + inject ligand atoms.
+
+## Agent launch (2026-08-07) — headless conductor submitted
+Handed off to an autonomous headless Claude agent (conductor) on Jed SLURM to build Workstream C
+through C(c). Artifacts: `PHASE6C_HANDOFF.md` (brief), `scripts/phase6C_agent.sbatch` (supervisor
+loop, qos=serial 8c/32G/48h, model=claude-sonnet-5, sentinel `logs/PHASE6C_DONE`),
+`docs/18-phase6C-user-comment.md` (async steering), `docs/19-phase6C-results.md` (to be written).
+Smoke test (job 65979817, qos=debug) PASSED on compute node jst368: internet OK, singularity OK,
+`claude -p` returned sentinel rc=0.
+
+### RESUME STATE (for the headless agent — keep this current)
+- Phase: C(a).3 — Path B ligand-aware graph builder. Build protein surface via normal `.sif`
+  (`scripts/p6_protein_surface_one.sh`, validated 5hls) + inject ligand heavy atoms as graph
+  nodes (unified 26-D `atoms.ligand_features`), covalent + vertex<->atom edges. Validate ONE
+  PDBbind complex end-to-end (read the output) before scaling.
+- Ligand path = **Path B (LOCKED, committed HEAD 410238d)**: ligand atoms as GRAPH NODES, NOT a
+  computed ligand surface. Do NOT re-enter the buggy `.sif extract_ligand` chemistry path.
+- Spend: ~CHF 0 (workstream C). Running child jobs: none.
+- Next after C(a).3: C(b) re-featurize ~3k PPI to 26-D + preprocess PDBbind refined ~5.3k (Jed
+  array children) -> cluster-clean split -> C(c) retrain on Kuma GPU -> 3-axis eval -> results doc
+  -> touch logs/PHASE6C_DONE.
