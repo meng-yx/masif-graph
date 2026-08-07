@@ -1,0 +1,189 @@
+"""Phase-6 C(c).3 axis 3 — does the encoder recover a drug-induced binding partner?
+
+For each of the 14 ligand-induced ternary systems, each subunit is one query (28 cases):
+
+  query patch  = that subunit's surface atoms within `--lig-radius` of the drug
+                 **+ the drug's own atom embeddings** (Path B: the drug is a graph of atoms)
+  DB entry     = the FULL surface-atom embedding set of a chain
+  score        = median_i max_j (z_qi)^T T (z_dj)          (the Phase-4/5 form)
+  target       = the other subunit of the same system
+
+Two deliberate choices keep the number honest:
+* the query uses **no knowledge of the partner** — the patch is defined by the drug alone, which is
+  exactly what "neosurface" means and what deployment would have. (The Phase-5 gate, by contrast,
+  uses interface patches on both sides.)
+* DB entries are **whole surfaces**, not interface patches, for the same reason — at deployment
+  nobody tells you which part of a database protein is the interface.
+
+The control that decides whether the signal is a *neosurface* signal at all is `--no-ligand`: the
+identical run with the drug's atom embeddings dropped from the query. If ranking does not improve
+when the drug is present, the model is just doing protein-surface matching and the ligand adds
+nothing — a negative result worth reporting plainly.
+
+n = 28. That is small, so per-system ranks are always emitted alongside the pooled numbers.
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import os
+
+import numpy as np
+import torch
+from scipy.spatial import cKDTree
+
+from masif_graph.p4.dataset import D_AA, D_VV, D_VA, load_chain_graph
+from masif_graph.p4.encoder import HeteroEncoder
+from masif_graph.p4.objective import Complementarity, normalize
+
+
+def systems(npz_dir):
+    return sorted({f[:-len("__lig.npz")] for f in os.listdir(npz_dir) if f.endswith("__lig.npz")})
+
+
+def decoy_chains(npz_dir, ids_file, limit=None):
+    out = []
+    ids = [l.strip() for l in open(ids_file) if l.strip() and not l.startswith("#")]
+    for cid in ids:
+        for pid in ("p1", "p2"):
+            p = os.path.join(npz_dir, f"{cid}__holo__{pid}.npz")
+            if os.path.exists(p):
+                out.append((f"{cid}:{pid}", p))
+    return out[:limit] if limit else out
+
+
+@torch.no_grad()
+def run(args):
+    dev = args.device
+    ck = torch.load(args.ckpt, map_location=dev)
+    cfg = ck.get("cfg", {})
+
+    sys_ids = systems(args.neosurf_data)
+    probe = load_chain_graph(os.path.join(args.neosurf_data, f"{sys_ids[0]}__holo__p1.npz"), dev)
+    enc = HeteroEncoder(probe["atom_feat"].shape[1], 4, D_AA, D_VV, D_VA, d=cfg.get("d", 64),
+                        d_out=cfg.get("d_out", 32), n_layers=cfg.get("layers", 4)).to(dev)
+    enc.load_state_dict(ck["enc"]); enc.eval()
+    comp = Complementarity(cfg.get("d_out", 32)).to(dev)
+    comp.load_state_dict(ck["comp"])
+
+    rng = np.random.default_rng(0)
+    raw, meta = {}, {}
+    for s in sys_ids:
+        g1 = load_chain_graph(os.path.join(args.neosurf_data, f"{s}__holo__p1.npz"), dev)
+        g2 = load_chain_graph(os.path.join(args.neosurf_data, f"{s}__holo__p2.npz"), dev)
+        gl = load_chain_graph(os.path.join(args.neosurf_data, f"{s}__lig.npz"), dev)
+        raw[(s, "p1")], raw[(s, "p2")], raw[(s, "lig")] = enc(g1), enc(g2), enc(gl)
+        lig_xyz = gl["coord"].cpu().numpy()
+        tree = cKDTree(lig_xyz)
+        meta[s] = {}
+        for pid, g in (("p1", g1), ("p2", g2)):
+            c = g["coord"].cpu().numpy()
+            near = np.flatnonzero(tree.query_ball_point(c, args.lig_radius, return_length=True) > 0)
+            meta[s][pid] = {"near": near, "n_surf": c.shape[0]}
+    decoys = decoy_chains(args.decoy_data, args.decoy_ids, args.max_decoys)
+    for name, path in decoys:
+        raw[("decoy", name)] = enc(load_chain_graph(path, dev))
+
+    mu = torch.cat([v for v in raw.values()], 0).mean(0, keepdim=True) if args.center else 0.0
+    emb = {k: normalize(v - mu) for k, v in raw.items()}
+    z_std = float(torch.cat(list(emb.values()), 0).std(0).mean())
+
+    # ---- DB: every subunit + every decoy, as a whole surface (subsampled for memory) ----
+    def cap(z):
+        if args.max_db_atoms and z.shape[0] > args.max_db_atoms:
+            return z[torch.tensor(np.sort(rng.choice(z.shape[0], args.max_db_atoms, False)))]
+        return z
+
+    dbk, mats, seg = [], [], []
+    for key in list(raw):
+        if key[0] == "decoy" or key[1] in ("p1", "p2"):
+            m = cap(emb[key])
+            if m.shape[0] == 0:
+                continue
+            seg.append(torch.full((m.shape[0],), len(dbk), dtype=torch.long))
+            mats.append(m); dbk.append(key)
+    Mdb, seg = torch.cat(mats, 0), torch.cat(seg, 0)
+    idx_of = {k: i for i, k in enumerate(dbk)}
+    TZ = comp.T @ Mdb.t()
+    n_db = len(dbk)
+
+    def rank_case(s, qr, with_ligand):
+        near = meta[s][qr]["near"]
+        if len(near) == 0:
+            return None
+        parts = [emb[(s, qr)][torch.tensor(near)]]
+        if with_ligand:
+            parts.append(emb[(s, "lig")])
+        q = torch.cat(parts, 0)
+        S = torch.full((q.shape[0], n_db), float("-inf"))
+        S.scatter_reduce_(1, seg.expand(q.shape[0], -1), q @ TZ, reduce="amax", include_self=True)
+        score = S.median(0).values
+        score[idx_of[(s, qr)]] = float("-inf")            # never retrieve the query itself
+        order = torch.argsort(score, descending=True).tolist()
+        target = idx_of[(s, "p2" if qr == "p1" else "p1")]
+        return order.index(target) + 1
+
+    out = {"ckpt": os.path.basename(args.ckpt), "n_systems": len(sys_ids), "db_chains": n_db,
+           "n_decoys": len(decoys), "lig_radius": args.lig_radius, "center": args.center,
+           "z_std": z_std, "cases": []}
+    for s in sys_ids:
+        for qr in ("p1", "p2"):
+            r_with = rank_case(s, qr, True)
+            r_without = rank_case(s, qr, False)
+            if r_with is None:
+                continue
+            out["cases"].append({"system": s, "query": qr, "n_near": int(len(meta[s][qr]["near"])),
+                                 "n_lig": int(emb[(s, "lig")].shape[0]),
+                                 "rank_with_ligand": r_with, "rank_no_ligand": r_without})
+
+    def summ(key):
+        r = np.array([c[key] for c in out["cases"]], float)
+        return {"n": len(r), "top1": float((r <= 1).mean()), "top5": float((r <= 5).mean()),
+                "top10": float((r <= 10).mean()), "top20": float((r <= 20).mean()),
+                "mrr": float((1 / r).mean()), "median_rank": float(np.median(r))}
+
+    out["with_ligand"] = summ("rank_with_ligand")
+    out["no_ligand"] = summ("rank_no_ligand")
+    out["chance_top5"] = round(5.0 / max(n_db - 1, 1), 5)
+    a = np.array([c["rank_with_ligand"] for c in out["cases"]], float)
+    b = np.array([c["rank_no_ligand"] for c in out["cases"]], float)
+    out["ligand_effect"] = {"n_better_with_ligand": int((a < b).sum()),
+                            "n_worse": int((a > b).sum()), "n_tied": int((a == b).sum()),
+                            "median_rank_delta": float(np.median(a - b))}
+
+    print(f"DB={n_db} chains ({len(decoys)} decoy) | z_std={z_std:.4f} | chance top5={out['chance_top5']:.4f}")
+    for k in ("with_ligand", "no_ligand"):
+        m = out[k]
+        print(f"  {k:12s} n={m['n']:3d} top1={m['top1']:.3f} top5={m['top5']:.3f} "
+              f"top10={m['top10']:.3f} MRR={m['mrr']:.3f} medRank={m['median_rank']:.0f}")
+    print(f"  ligand effect: better {out['ligand_effect']['n_better_with_ligand']} / "
+          f"worse {out['ligand_effect']['n_worse']} / tied {out['ligand_effect']['n_tied']} "
+          f"(median rank delta {out['ligand_effect']['median_rank_delta']:+.0f})")
+    print("  per-case ranks (with/without ligand):")
+    for c in out["cases"]:
+        print(f"    {c['system']:10s} {c['query']} near={c['n_near']:4d} lig={c['n_lig']:3d} "
+              f"{c['rank_with_ligand']:5d} / {c['rank_no_ligand']:5d}")
+    if args.out:
+        os.makedirs(os.path.dirname(args.out) or ".", exist_ok=True)
+        json.dump(out, open(args.out, "w"), indent=1)
+        print("wrote", args.out)
+    return out
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--neosurf-data", required=True)
+    ap.add_argument("--decoy-data", required=True)
+    ap.add_argument("--decoy-ids", required=True)
+    ap.add_argument("--ckpt", required=True)
+    ap.add_argument("--center", action="store_true")
+    ap.add_argument("--lig-radius", type=float, default=6.0)
+    ap.add_argument("--max-decoys", type=int, default=0)
+    ap.add_argument("--max-db-atoms", type=int, default=1500)
+    ap.add_argument("--out", default=None)
+    ap.add_argument("--device", default="cpu")
+    run(ap.parse_args())
+
+
+if __name__ == "__main__":
+    main()
