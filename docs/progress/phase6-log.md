@@ -45,3 +45,19 @@ sequential ~1.5-2h) -> `logs/phase6/gate_scale_{tag}_pos.json`. Monitor **b4hpqi
 `scripts/p6_scale_plot.py` when 6 jsons present -> `notebooks/figs/fig_scaling.png` + verdict
 (AA top5 & HH top5 vs size, 2 seeds; full point x=4811 from gate_fullclean). Verdict rule: slope 3000->4811
 > +0.02 = climbing (fund larger corpus / DIPS); else saturated (invest in ligands, Workstream C).
+
+## Workstream C — STARTED (2026-08-06)
+Datasets: PDBbind refined ~5.3k (D-C1, `data/pdbbind/`), MolGlueDB 114 ternary = benchmark. Training =
+mixture PPI(>=3k)+protein-ligand; unified atom space; leakage = protein-cluster + ligand-scaffold.
+
+### C(a).1 — unified atom featurizer DONE
+`src/masif_graph/p6/atoms.py`: ONE 26-D atom vector for protein AND ligand heavy atoms —
+elem_onehot(10: C,N,O,S,P,F,Cl,Br,I,other) + is_ligand + is_backbone + aromatic + degree + is_surface +
+in_ring + hybridization(3) + hbond_donor + hbond_acceptor + formal_charge + flex_depth + element-chem(3).
+Ligand path = RDKit (mol2/sdf: hybridization/aromatic/ring/charge/Hbond via SMARTS); protein path reuses
+Phase-2 signals + hbond/charge/hybrid by atom-name & residue rules. Validated: ligand 5hls (26,26) +
+protein 1CQ3_A (1687,26), DIM match, sane feature fractions. Dim change 14->26 => encoder retrains in C(c).
+RDKit 2026.03 present; element-chem lookup already covers halogens+Se.
+### C(a) remaining: (2) .sif ligand-modified surface (01-triangulate + ligand code/mol2) smoke on 1 PDBbind
+complex; (3) ligand-aware hetero graph builder (protein+ligand atom nodes, protein+ligand bonds, vertex-atom
+edges to both) + end-to-end validation.
