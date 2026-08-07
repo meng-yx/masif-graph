@@ -111,6 +111,35 @@ Three parts:
   molecular-glue ternary systems: CRBN+IMiD → ZF degrons, DCAF15, etc.) — retrieval of the true recruited
   domain, with a ligand-present vs ligand-absent contrast to show the neosurface signal is real.
 
+### Workstream C — training design & data decisions (locked with user, 2026-08-06)
+
+**Unified atom representation (the transfer mechanism).** One shared encoder + one shared bilinear `T`,
+with protein and ligand heavy atoms in the **same atom-node feature space** (element / hybridization /
+H-bond donor-acceptor / charge / aromaticity — features that describe *any* atom). The Phase-4/5
+complementarity loss is applied to **two positive-pair types**:
+- PPI: protein-surface-patch(A) ↔ protein-surface-patch(B) (contact);
+- protein–ligand: protein-surface-patch ↔ **ligand atoms** (contact in the binding site).
+So the model learns *what local geometry+chemistry is complementary* independent of protein-vs-ligand.
+
+**Mixture training + mixture held-out validation.** Train on PPI (≥3,000, the Workstream-B-saturated set) +
+protein–ligand (PDBbind). Validate on: (1) a **mixed held-out** (both types) during training; (2) **do-no-harm**
+on the Phase-5 PPI gate (287-clean) — must not regress; (3) the **neosurface benchmark** (MolGlueDB 114 +
+masif-neosurf 13-target `computational_benchmark`).
+
+**Leakage discipline for the mixture (stricter than PPI-only):** sequence-cluster on proteins (Phase-5) AND
+**ligand-scaffold clustering** on the small molecules — PDBbind has many shared targets + congeneric ligand
+series, so hold out by protein cluster AND scaffold to prevent memorizing target/scaffold pairs.
+
+**Data decisions:**
+- **D-C1 — start with PDBbind REFINED (~5,316)** (`data/pdbbind/` via PLANET; index `data/pdbbind_index/`).
+  The dataset choice — refined vs general (~19,443), and surface-exposed-only vs all — is a **knob to sweep
+  later**, not final. (Even buried-ligand complexes teach protein↔ligand atom complementarity; the
+  surface-exposed filter mainly sharpens the *neosurface* signal → a refinement to test, not a blocker.)
+- **D-C2 — defer nucleic acids** (PDBbind protein–nucleic PN=1,052, nucleic–ligand NL=149) to a later
+  cross-molecule-type generalizability test — consistent with the generalizable-atom thesis, out of pass 1.
+- **Benchmark (not training):** MolGlueDB 114 ternary PDBs (`data/molgluedb_benchmark_pdbs.txt`); redundant
+  E3-target pairs → benchmarking only.
+
 ## 6. Deployment framing (record the correction)
 The **TED human-domainome AF2 database** (`/work/upthomae/Meng/TED_human_domainome_MaSIF/`, ~25.7k
 intracellular domains, frozen descriptors precomputed) is used **only for inference** — running the trained
