@@ -172,6 +172,7 @@ def train(args):
         losses, zstds, tr_top1 = [], [], []
         for idx in make_batches(kinds, args.batch, args.pl_frac, rng):
             raws, partner, zfull = [], [], []
+            raws_by_kind = {"ppi": [], "pl": []}
             for k in idx:
                 c = train_recs[k][2].to(dev)
                 pos = getattr(c, args.patch_key)
@@ -181,6 +182,7 @@ def train(args):
                     continue
                 z1r, z2r = enc(c.p1), enc(c.p2)
                 raws.append(z1r[i1]); raws.append(z2r[i2])
+                raws_by_kind[train_recs[k][1]] += [z1r[i1], z2r[i2]]
                 b = len(raws); partner += [b - 1, b - 2]       # the two chains partner each other
                 zfull.append((normalize(z1r), normalize(z2r), pos))
             if len(raws) < 4:
@@ -201,7 +203,15 @@ def train(args):
                 if na:
                     loss = loss + args.w_atom * (al / na)
             if args.vicreg_var > 0 or args.vicreg_cov > 0:
-                v, cc = vicreg_terms(torch.cat(raws, 0))
+                # VICReg must be computed PER TYPE, not over the pooled batch. Protein and ligand
+                # atoms are trivially separable (the `is_ligand` feature alone does it), so a
+                # pooled variance term is satisfied by two tightly-clustered point masses sitting
+                # far apart — exactly the collapse it is supposed to prevent, and invisible in the
+                # pooled statistic. Averaging per-type terms forces spread *within* each type.
+                terms = [vicreg_terms(torch.cat(g, 0)) for g in (raws_by_kind["ppi"],
+                                                                 raws_by_kind["pl"]) if g]
+                v = sum(t[0] for t in terms) / len(terms)
+                cc = sum(t[1] for t in terms) / len(terms)
                 loss = loss + args.vicreg_var * v + args.vicreg_cov * cc
             if not torch.isfinite(loss):
                 continue
