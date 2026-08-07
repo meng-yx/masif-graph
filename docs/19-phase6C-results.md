@@ -153,7 +153,40 @@ to the right cause:
 *(pending)*
 
 ## 7. Reproduction
-*(pending — commands + artefact paths)*
+
+Artefacts (all committed paths are in this repo; large binaries live on `/work`, which is shared
+Jed↔Kuma and is not on the /scratch cleanup timer):
+
+| what | where |
+|---|---|
+| 26-D PPI npz / protein–ligand npz / eval npz / neosurface npz | `/work/upthomae/Meng/phase6C/npz_{ppi,pl,eval,neosurf}` |
+| split + `split_report.json` | `logs/phase6C/split/` |
+| checkpoints | `/work/upthomae/Meng/phase6C/ret_{combined,ppionly,plonly}_best.pt` |
+| training curves | `/work/upthomae/Meng/phase6C/ret_*_result.json`, `logs/train_*.out` |
+| all evaluation JSONs | `logs/phase6C/results/` |
+| running log (decisions, spend, job ids) | `docs/progress/phase6C-log.md` |
+
+```bash
+# --- data (Jed) --------------------------------------------------------------------------------
+sbatch --array=0-265%220 scripts/p6C_pdbbind_array.sbatch \
+       logs/phase6C/pl_chunks /work/upthomae/Meng/phase6C/npz_pl     # PDBbind refined -> Path-B npz
+sbatch --array=0-7%8       scripts/p6C_refeat_array.sbatch            # PPI 14-D -> 26-D, verified
+sbatch --array=0-13        scripts/p6C_neosurf_array.sbatch /work/upthomae/Meng/phase6C/npz_neosurf
+python -m masif_graph.p6.split --ppi-ids logs/phase6C/final_ppi.txt \
+       --pl-ids logs/phase6C/final_pl.txt --out logs/phase6C/split
+bash scripts/p6C_stage_split.sh logs/phase6C/split && bash scripts/p6C_make_npz_all.sh
+
+# --- training (Kuma H100; /work is shared, so no data transfer is needed) -----------------------
+ssh ymeng@kuma.hpc.epfl.ch 'cd /work/upthomae/Meng/phase6C && \
+  sbatch p6C_kuma_pipeline.sbatch combined combined 15 32 0 && \
+  sbatch p6C_kuma_pipeline.sbatch ppionly  ppionly  30 32 0 && \
+  sbatch p6C_kuma_pipeline.sbatch plonly   plonly   30 32 0'
+
+# --- evaluation: all three axes for one checkpoint (compute node, never the login node) ---------
+sbatch scripts/p6C_gate.sbatch combined /work/upthomae/Meng/phase6C/ret_combined_best.pt \
+       /work/upthomae/Meng/phase6C/npz_eval
+python scripts/p6C_collect_results.py          # regenerates the tables above from the JSONs
+```
 
 ## 8. Verdict
 *(pending)*
