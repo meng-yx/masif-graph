@@ -28,8 +28,9 @@ def tags():
         for pref in ("gate_", "mixed_", "neosurf_"):
             if f.startswith(pref) and f.endswith(".json"):
                 t = f[len(pref):-len(".json")].replace("_pos_sc", "").replace("_pos", "")
-                if t.startswith("scafclean_"):
-                    t = t[len("scafclean_"):]
+                for sub in ("scafclean_", "scafdedup_"):     # axis-2 variants share the model tag
+                    if t.startswith(sub):
+                        t = t[len(sub):]
                 if t not in seen:
                     seen.append(t)
     return [t for t in ORDER if t in seen] + [t for t in seen if t not in ORDER]
