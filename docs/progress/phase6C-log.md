@@ -331,3 +331,25 @@ decision (learned AUC at chance) came back negative.
 (4026517/18/19, elapsed 1:10) — reattached rather than resubmitted. `ret_plonly_best.pt` already
 written (first checkpoint saved at Stage-B epoch 4). Random-init control gate re-run (65983164)
 completed and produced the scaffold-deduplicated variant.
+
+## 12. Axis-3 strengthening: a frozen-MaSIF baseline (job 65983220, CHF 0.92)
+
+The neosurface build deliberately skips the descriptor net (the learned encoder never reads it), so
+axis 3 initially had no published-method baseline. Regenerated the 04b precompute + ran the
+descriptor net for the 14 systems (the `.ply` surfaces survived, so step 01 was not repeated),
+rebuilt their npz with real descriptors, and added a `frozen` arm to `neosurf_bench`:
+`S(q,d) = median_i min_j ||ds_qi - df_dj||` on the **identical** patches. **14/14 rebuilt.**
+
+Honest scope of that baseline: frozen MaSIF is **ligand-blind by construction here** — Path B builds
+the protein surface *without* the drug, so the frozen descriptor cannot see it. It is therefore
+comparable to the learned **no-ligand** arm, not the with-ligand arm. The evaluator reports
+availability explicitly rather than silently scoring rows of zeros.
+
+**Result (model-independent, so it is fixed for every checkpoint): frozen MaSIF is at chance on this
+benchmark** — top5 0.000, median rank **308 of 596** (chance top5 0.0084). Consistent with the
+Phase-4 §23 finding that frozen's apparent edge disappears at scale on dense/whole-surface DBs; here
+the DB is 596 whole chain surfaces and the query is a small drug-proximal patch.
+
+Also fixed while here: `save_protein_npz` was hardcoding zero descriptors instead of writing the
+mean-pooled ones from `surf.emb_straight`, which would have silently disabled any frozen comparison
+on these artefacts.
