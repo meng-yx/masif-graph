@@ -118,3 +118,33 @@ Epoch counts are set so **per-type exposure is equal** across the three runs, so
 attributable to the other corpus being present rather than to more gradient steps.
 
 Spend: ~CHF 3 Jed + CHF 0.43 Kuma probe so far; the three runs are estimated at ~CHF 8-9.
+
+### ✅ WORKSTREAM C COMPLETE (2026-08-07 ~20:40) — `docs/19-phase6C-results.md`
+
+Three axes, four controls (random-init / PPI-only / ligand-only / Phase-5 14-D anchor), ~CHF 7.5 of 100.
+
+| model | axis 1 HH / AA | axis 2 ligand medR (scaffold-unseen, chance 96) | axis 3 medR (chance ~298) |
+|---|---|---|---|
+| Phase-5 14-D anchor | 0.630 / 0.639 | — | — |
+| 26-D PPI-only | **0.651 / 0.660** | 94 | 236 |
+| 26-D ligand-only | 0.011 / 0.013 | 77 | 253 |
+| **26-D COMBINED** | 0.610 / 0.623 | **54** | 267 |
+| frozen MaSIF | 0.084 / 0.061 | — | 308 |
+
+1. **Do-no-harm: PASS with a small measured cost.** Inside the ±0.04 seed spread of the Phase-5
+   anchor; ~one seed spread below the matched 26-D PPI-only control. Median rank 1, robustness
+   preserved, ~7× frozen. Worth noting the 26-D space is itself a small *gain* over 14-D.
+2. **Transfer hypothesis SUPPORTED** — the headline scientific result. The combined model roughly
+   **doubles** the ligand-only model's ligand-retrieval signal, while PPI-only training sits exactly
+   at chance. Both available confounds run *against* this conclusion (equal ligand exposure, and
+   combined's in-batch ligand decoys are *easier*), and the train-vs-held-out diagnostic rules out
+   overfitting: `plonly` scores 0.041 train / 0.036 held-out (it never learned the task), `combined`
+   0.095 / 0.040 (PPI data more than doubles even the *training* fit). **Caveat: the absolute level
+   is far from deployable** — top-5 0.04–0.07 against a 0.02–0.03 chance line.
+3. **Neosurface: NEGATIVE / INCONCLUSIVE.** Nothing beats chance at DB=596 — **including frozen
+   MaSIF** (308 vs ~298), so this is a hard benchmark under an oracle-free protocol, not a specific
+   failure of the learned encoder. n=28 cannot resolve the effect.
+
+**Two things I would do next, in order:** (1) give the ligand a shape channel — Path B's missing MSMS
+surface is the most plausible cause of both the axis-3 null and axis-2's low ceiling; (2) run ≥2 seeds
+before treating the −0.04 do-no-harm gap as real (everything here is one seed per condition).
