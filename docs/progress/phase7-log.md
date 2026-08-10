@@ -228,3 +228,25 @@ Flagging by the direct measure rather than by atom count, because atom count is 
 "<8 atoms" rule catches only 19 of the 45, while "<12 atoms" catches 44 but discards 479 complexes
 (9.1%) that are fine. At 0.9% the effect is too small to change any headline, but the flag list
 exists so the axis-2 numbers can be re-run with those complexes excluded as a sensitivity check.
+
+## RESULTS — see `docs/21-phase7-results.md`
+
+All 4 training runs and all 14 evaluation jobs complete. Headline: **the Phase-7 hypothesis is not
+supported.** Train-set P-L retrieval (the primary gate) is unchanged at 0.111 +/- 0.007 vs
+0.119 +/- 0.024, so the ligand's missing shape channel was **not** the capacity bottleneck. Held-out
+P-L retrieval does improve (0.054 -> 0.084; 0.076 -> 0.111 scaffold-clean), i.e. better
+generalisation without better capacity. Cost: PPI 0.644 -> 0.475, a -0.169 do-no-harm regression in
+both seeds, with PPI *training* accuracy also down (0.448 -> 0.363), which points at capacity
+competition rather than overfitting.
+
+Two secondary results worth carrying forward:
+* **The Phase-6C -0.041 do-no-harm gap is not real** — at 2 seeds it is -0.017 +/- 0.019, inside the
+  spread. The user's insistence on seeds before believing it was right.
+* **The composite-neosurface hypothesis is refuted**, not merely unsupported: composite 337 +/- 2 vs
+  separate-surface 347 +/- 15 vs composite-without-drug 335 +/- 13, all below the ~298 chance line.
+  That was the strongest remaining explanation for the axis-3 null and it is wrong.
+
+New capability: axis 4 (ligand-axis holo->AF3-apo robustness) shows drops of only +0.007/+0.014
+top-5, so conformational change is not the ligand axis's limiting factor either.
+
+Spend ~CHF 22.
