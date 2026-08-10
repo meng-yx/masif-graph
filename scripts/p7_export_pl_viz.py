@@ -37,6 +37,57 @@ SURF7 = "/work/upthomae/Meng/phase7/lig_surf"
 NPZ7 = "/work/upthomae/Meng/phase7/npz_pl"
 
 
+def _undirected(edge_2xE):
+    """(2,E) directed-both-ways -> unique undirected (M,2), same convention as p4_export_graph_viz."""
+    e = np.asarray(edge_2xE)
+    if e.ndim != 2 or e.shape[1] == 0:
+        return np.zeros((0, 2), np.int64)
+    return np.unique(np.sort(e.T, axis=1), axis=0)
+
+
+def _write_lig_pdb(mol, idx, path):
+    from rdkit import Chem
+    sub = Chem.RWMol(mol)
+    conf = mol.GetConformer()
+    with open(path, "w") as fh:
+        for k, a in enumerate(idx):
+            at = mol.GetAtomWithIdx(a)
+            p = conf.GetAtomPosition(a)
+            fh.write("HETATM%5d %-4s LIG L   1    %8.3f%8.3f%8.3f  1.00  0.00          %2s\n"
+                     % (k + 1, (at.GetSymbol() + str(k + 1))[:4], p.x, p.y, p.z, at.GetSymbol()))
+        for b in mol.GetBonds():
+            i, j = b.GetBeginAtomIdx(), b.GetEndAtomIdx()
+            if i in idx and j in idx:
+                fh.write("CONECT%5d%5d\n" % (idx.index(i) + 1, idx.index(j) + 1))
+        fh.write("END\n")
+    _ = sub
+
+
+def _write_pocket_pdb(cid, lig_xyz, path, radius=12.0):
+    """Whole residues of the protein chain within `radius` of the ligand."""
+    from masif_graph.io.reference import PDB_DIR
+    src = os.path.join(PDB_DIR, f"{cid}_A.pdb")
+    lines, keys, xyz = [], [], []
+    with open(src) as fh:
+        for line in fh:
+            if line[:6] in ("ATOM  ", "HETATM") and len(line) >= 54:
+                lines.append(line.rstrip("\n"))
+                keys.append(line[21] + line[22:27])
+                xyz.append([float(line[30:38]), float(line[38:46]), float(line[46:54])])
+    if not lines:
+        return 0
+    xyz = np.array(xyz)
+    near = cKDTree(lig_xyz).query(xyz, k=1)[0] <= radius
+    keep_res = {k for k, n in zip(keys, near) if n}
+    with open(path, "w") as fh:
+        n = 0
+        for line, k in zip(lines, keys):
+            if k in keep_res:
+                fh.write(line + "\n"); n += 1
+        fh.write("END\n")
+    return n
+
+
 def export(pid, out, crop=12.0, surf_dir=SURF7, npz_dir=NPZ7, pdbbind="data/pdbbind"):
     cid = f"pl{pid}"
     lv = np.load(f"{surf_dir}/lig{pid}_verts.npy")
@@ -75,6 +126,13 @@ def export(pid, out, crop=12.0, surf_dir=SURF7, npz_dir=NPZ7, pdbbind="data/pdbb
     cz = np.load(f"{npz_dir}/{cid}__contacts.npz")
     pos = cz["pos"].reshape(-1, 2)
 
+    # the ligand's GRAPH edges, straight from the npz the encoder consumes, so the viewer shows the
+    # actual model input rather than a re-derivation of it
+    lz = np.load(f"{npz_dir}/{cid}__holo__p2.npz")
+    lig_vv = _undirected(lz["vv_edge"])
+    lig_va = np.stack([lz["va_v"], lz["va_a"]], 1) if len(lz["va_v"]) else np.zeros((0, 2), np.int64)
+    lig_aa = _undirected(lz["aa_edge"])
+
     rep = {"id": pid, "lig_atoms": int(len(lig_xyz)), "lig_verts": int(len(lv)),
            "lig_faces": int(len(lf)), "verts_per_atom": round(len(lv) / len(lig_xyz), 2),
            "elements": sorted(set(lig_el.tolist())),
@@ -93,8 +151,15 @@ def export(pid, out, crop=12.0, surf_dir=SURF7, npz_dir=NPZ7, pdbbind="data/pdbb
     rep["lig_surface_area_A2"] = round(float(area), 1)
     rep["lig_area_per_heavy_atom"] = round(float(area / len(lig_xyz)), 1)
 
+    # companion PDBs so PyMOL can show real sticks/cartoon without anything else from the cluster
+    stem = out[:-4]
+    _write_lig_pdb(mol, heavy, stem + "_ligand.pdb")
+    n_pocket = _write_pocket_pdb(cid, lig_xyz, stem + "_pocket.pdb", radius=crop)
+    rep["pocket_pdb_atoms"] = n_pocket
+
     os.makedirs(os.path.dirname(out) or ".", exist_ok=True)
     np.savez_compressed(out, lig_verts=lv, lig_faces=lf, lig_normals=ln, lig_feat=lfe,
+                        lig_vv_edge=lig_vv, lig_va_edge=lig_va, lig_aa_edge=lig_aa,
                         lig_atom_xyz=lig_xyz, lig_atom_elem=lig_el, lig_bonds=bonds,
                         prot_verts=pv[keep], prot_faces=pf_c, prot_feat=pfe[keep],
                         prot_atom_xyz=prot_atom, contacts=pos,

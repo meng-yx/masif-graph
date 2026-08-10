@@ -68,3 +68,8 @@ viz_positives/
 /logs/phase5/mmseqs/*
 !/logs/phase5/mmseqs/clu_cluster.tsv
 /tmp_mmseqs/
+
+# Phase-7 PyMOL viz bundle (small, but data artifacts): keep the scripts, not the exports
+logs/phase7/viz/*.npz
+logs/phase7/viz/*_ligand.pdb
+logs/phase7/viz/*_pocket.pdb
