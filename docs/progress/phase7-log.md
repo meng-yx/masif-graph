@@ -121,3 +121,38 @@ so the crystal ligand pose stays valid against the predicted protein.
 `p7/pl_af3.py` recomputes contacts on the AF3 structure against the same crystal ligand rather than
 reusing holo rows — the AF3 surface has its own atom rows, and the change in the contact set is part
 of what is being measured (`contact_ratio_af3_over_holo`).
+
+## S4 — a Stage-A divergence on ONE seed (found, diagnosed, contained)
+
+Watching the Stage-A diagnostics across the four runs:
+
+| run | ep1 gnorm max | ep15 gnorm max | ep15 loss | ep15 val SC AUC |
+|---|---|---|---|---|
+| `p7comb_s0` | 11.6 | 5.2 | 7.58 | 0.492 |
+| **`p7comb_s1`** | **1,114.7** | **1,558,297.9** | **36.82** | 0.533 |
+| `p6comb_s1` | 18.5 | 3.8 | 7.58 | 0.600 |
+
+Seed 1 of the **Phase-7** arm diverged; seed 0 on the same data and seed 1 on the Phase-6C data both
+stayed clean. So it is a data x seed interaction, not either alone.
+
+**Data checked before blaming the optimiser.** All 5,239 Phase-7 ligand npz: every vertex channel
+inside [-1, 1], zero non-finite values, no anomalous `vv`/`va` edge lengths. The new features are
+clean, so this is optimisation instability, not a feature pathology.
+
+**Contained by checkpoint selection**: Stage A saves on best held-out AUC, and seed 1's best was
+**epoch 5 (0.670)** — before the blow-up — so Stage B initialised from a sane point.
+
+Recorded as a finding rather than papered over: **the Phase-4 Stage-A recipe is not robust on the
+combined corpus at every seed.** A single-seed run would have hidden this entirely, which is the
+argument for D7-6. If seed 1's Stage B turns out anomalous, a third seed gets added rather than
+averaging a broken run into the Phase-7 arm.
+
+Note also that Stage-A held-out AUC *declines* from ~0.70 at epoch 5 to 0.49-0.60 at epoch 15 on the
+combined corpus for every arm, with normalised `z_std` at ~0.001. That is the Phase-6C DC-offset
+picture again (docs/progress/phase6C-log.md §9), and Stage B is where centering fixes it — but it
+means Stage A is over-trained at 15 epochs for this corpus, worth revisiting if Phase 8 reuses it.
+
+## S5 — AF3 MSA complete
+
+**298 / 300** chains have a `_data.json` (0 `MSA_FAIL`; 2 chains produced no output). Inference
+probe submitted to Kuma to measure per-chain GPU time before committing the full set.
