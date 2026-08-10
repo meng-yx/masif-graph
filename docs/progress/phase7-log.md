@@ -188,3 +188,43 @@ The Phase-7 arm is ahead on the ligand axis and well behind on PPI at matched ep
 so the final numbers can be read against the trajectory — this is epoch 8 of 32 under a cosine
 schedule, where most of the movement is still to come, and the Phase-7 arm is also the slower one
 per epoch (518 s vs 485 s). No conclusion is drawn from it.
+
+## Visual QC of the ligand surfaces (5 examples) — and one real defect found
+
+`scripts/p7_export_pl_viz.py` + `scripts/p7_pl_viz_figs.py` (the Phase-7 analogue of
+`p4_export_graph_viz.py` / `p4_graph_pymol.py`) render a per-complex QC sheet: the molecule, the
+surface shaded by each of the four channels, the ligand surface inside the protein pocket surface,
+and the actual training contacts. Sheets in `notebooks/figs/p7_ligsurf_*.png`.
+
+Examples chosen to stress different failure modes: `1a99` (6 atoms — smallest), `4ghi` (Cl+F),
+`5czm` (Br+Cl+P, 52 atoms), `5b25` (held-out, 7 rings), `3h8b` (71 atoms — largest).
+
+**Four of five are clearly correct.** The mesh follows the molecular skeleton lobe-for-lobe, the
+saddle between ring systems shows up as genuine concavity in `si`, halogens carry surface (the D7-2
+radii fix working — `5czm` has Br and Cl on the surface, which the reference table would have
+dropped), and the ligand interdigitates with the protein pocket (closest ligand-surface vertex to a
+protein atom 0.76-0.98 A, with 313-451 contacts spread over the whole molecule).
+
+**Risk R1 is confirmed for very small ligands.** `1a99` (6 atoms) yields a near-spherical blob:
+`si` in [-0.16, +1.00] with essentially no concave vertices, and **20.6 A^2/atom against a corpus
+median of 11.9**. A 1.5 A probe simply rolls over a 6-atom molecule.
+
+Quantified corpus-wide (`logs/phase7/lig_degeneracy.npy`), concavity rises monotonically with size:
+
+| ligand atoms | n | area/atom (A^2) | frac concave vertices |
+|---|---|---|---|
+| <8 | 67 | 15.0 | 0.039 |
+| 8-12 | 412 | 13.4 | 0.066 |
+| 12-16 | 521 | 12.8 | 0.091 |
+| 16-20 | 576 | 12.4 | 0.117 |
+| 20-30 | 1,855 | 11.9 | 0.143 |
+| 30-50 | 1,551 | 11.5 | 0.183 |
+| >=50 | 257 | 11.3 | 0.227 |
+
+**45 of 5,239 ligands (0.9%)** have <2% concave vertices, i.e. are blob-like; all have <=13 atoms.
+Listed in `logs/phase7/lig_surface_degenerate.txt`.
+
+Flagging by the direct measure rather than by atom count, because atom count is a poor proxy: a
+"<8 atoms" rule catches only 19 of the 45, while "<12 atoms" catches 44 but discards 479 complexes
+(9.1%) that are fine. At 0.9% the effect is too small to change any headline, but the flag list
+exists so the axis-2 numbers can be re-run with those complexes excluded as a sensitivity check.
