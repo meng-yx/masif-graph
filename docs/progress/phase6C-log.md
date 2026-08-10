@@ -417,3 +417,20 @@ combined 5.49, ppionly 3.30, plonly 2.80).
 ### RESUME STATE — WORKSTREAM C COMPLETE
 All of C(a)/C(b)/C(c) done and self-verified; `docs/19-phase6C-results.md` written with per-axis
 verdicts, controls, spread and caveats; `logs/PHASE6C_DONE` touched. No jobs running.
+
+---
+
+## Correction + Phase 7 (2026-08-07, user directive)
+
+**Correction accepted.** This log and `docs/19` stated that AF3 generation for the PDBbind proteins
+was out of scope for Workstream C, citing the handoff. That reading was wrong: the handoff's
+"AF3/MSA are NOT needed here" was written when C's corpus was assumed to be the *existing* PPI set.
+C then added ~5,000 new protein-ligand complexes, and new training data implies generating the
+matching apo state. Fixed in `docs/19`; taken up as Phase 7 D7-7.
+
+**Phase 7 opened** (`docs/20-phase7-design.md`): give the ligand a real MSMS surface with the same
+four channels the protein carries. Motivated by the Phase-6C train-vs-held-out diagnostic — the
+combined model cannot fit the ligand axis on its *own training data* (P-L train top-5 0.095 vs PPI
+0.429), i.e. a capacity/representation failure, not a generalization failure. Plus: composite
+protein+ligand neosurfaces (inference-only), >=2 seeds per condition, and AF3-apo on the held-out
+ligand set.

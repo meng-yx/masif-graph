@@ -379,10 +379,15 @@ valid* for axes 1 and 2 within the stated seed caveat. *The result is not establ
   (RCSB ModelServer instance endpoint) — matching the deployment assumption that a ligand-bearing
   structure always comes from experiment.
 * **Ligand-axis robustness (AF3-apo protein + experimental ligand)** is the natural next test of the
-  project's north star applied to protein–ligand, and it is out of scope for C (the handoff excludes
-  new AF3/MSA generation). The rule for it is fixed in advance by user decision: **the protein
-  varies, the ligand stays at its experimental pose** — predicting an apo ligand conformation is
-  meaningless, and if a future workflow needs a nominal pair, the ligand is duplicated unchanged.
+  project's north star applied to protein–ligand. **Correction (2026-08-07, user):** an earlier draft
+  of this bullet called it "out of scope for C, the handoff excludes new AF3/MSA generation". That
+  was wrong. The handoff's "AF3/MSA are NOT needed here" was written when C's corpus was assumed to
+  be the *existing* PPI set; C then added ~5,000 new protein–ligand complexes, and new training data
+  implies generating its matching apo state. It is taken up in **Phase 7** (`docs/20-phase7-design.md`
+  D7-7), scoped to the ~300 held-out `val_pl` proteins first. The rule is fixed by user decision:
+  **the protein varies, the ligand stays at its experimental pose** — predicting an apo ligand
+  conformation is meaningless, and if a future workflow needs a nominal pair, the ligand is
+  duplicated unchanged.
 * **Ligand-derived surface vertices.** Path B gives the ligand chemistry and connectivity but no
   MSMS shape channel (see §1). A from-scratch ligand-surface tier remains the stretch option.
 * MolGlueDB's 114 ternary PDBs were **not** used: the masif-neosurf `computational_benchmark` is the
