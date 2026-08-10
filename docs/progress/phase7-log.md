@@ -156,3 +156,35 @@ means Stage A is over-trained at 15 epochs for this corpus, worth revisiting if 
 
 **298 / 300** chains have a `_data.json` (0 `MSA_FAIL`; 2 chains produced no output). Inference
 probe submitted to Kuma to measure per-chain GPU time before committing the full set.
+
+## S5 — AF3-apo data COMPLETE, axis 4 validated
+
+| step | outcome |
+|---|---|
+| MSA | **298 / 300** chains (0 `MSA_FAIL`; 2 produced no output) |
+| inference | **298 / 298** models, **~60 s/chain** on an H100 |
+| AF3 surfaces + contacts | **298 / 298** |
+| usable for robustness (>=8 contacts in BOTH states) | **283 / 300** |
+
+**The superposition is sound**, which is the thing that could silently have been wrong: contact ratio
+AF3/holo has median **0.99** (p10 0.72, p90 1.41) and **zero** complexes where the AF3 model fails to
+contact the crystal ligand at all. A broken frame would have produced ratios at zero across the board.
+
+Cost reality check: inference came in at ~60 s/chain against a ~12 min/chain projection from the
+Phase-5 anchor, so the whole S5 arm is **~CHF 8** rather than the ~CHF 39 originally budgeted. Probing
+before committing was worth the ten minutes.
+
+**Axis-4 harness validated on the random-init encoder** — all four role cells at chance
+(top5 0.011-0.021 against a shuffled control of 0.014; median rank 143-152 of 283, chance ~141).
+
+## Mid-training observation (epoch 8 of 32, NOT a result)
+
+| run | train top1 | PPI top5 | P-L top5 |
+|---|---|---|---|
+| `p7comb_s1` (ligand surface) | 0.242 | 0.091 | **0.069** |
+| `p6comb_s1` (no surface) | 0.363 | 0.500 | **0.052** |
+
+The Phase-7 arm is ahead on the ligand axis and well behind on PPI at matched epoch. Recorded only
+so the final numbers can be read against the trajectory — this is epoch 8 of 32 under a cosine
+schedule, where most of the movement is still to come, and the Phase-7 arm is also the slower one
+per epoch (518 s vs 485 s). No conclusion is drawn from it.
