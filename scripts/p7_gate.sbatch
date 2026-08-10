@@ -21,7 +21,7 @@ cd $ROOT
 TAG="${1:?tag}"; CKPT="${2:?ckpt}"
 PLD="${3:-/work/upthomae/Meng/phase7/npz_pl}"
 NBD="${4:-/work/upthomae/Meng/phase7/npz_neosurf}"
-CMP="${5:-/work/upthomae/Meng/phase7/npz_composite}"
+CMP="${5:-}"   # empty = skip the composite arm (Phase-6C models never saw ligand vertices)
 P7=/work/upthomae/Meng/phase7
 OUT=logs/phase7/results; mkdir -p "$OUT"
 
