@@ -34,6 +34,10 @@ ATOM_FEATURES = [                      # the 26-D unified atom vector (src/masif
     "hyb_sp", "hyb_sp2", "hyb_sp3", "hbond_donor", "hbond_acceptor", "formal_charge",
     "flex_depth", "electronegativity", "valence", "covalent_radius"]
 VERT_FEATURES = ["si", "hbond", "charge", "hphob"]
+# edge features the GNN consumes, per edge type (dataset.py: D_AA=5, D_VV=9, D_VA=9)
+EDGE_FEATURES = {"aa": ["bond_order(one-hot x4)", "sidechain_rotatable"],
+                 "vv": ["length -> RBF(8, 0-4 A)", "cos(normal_i, normal_j)"],
+                 "va": ["distance -> RBF(8, 0-5 A)", "cos(normal_v, unit(atom - vertex))"]}
 ELEMENTS = ["C", "N", "O", "S", "P", "F", "Cl", "Br", "I", "other"]
 
 
@@ -46,7 +50,12 @@ def _undirected(e2):
 
 def _side_from_npz(npz_path, vert_xyz, faces, normals, atom_xyz, atom_elem):
     z = np.load(npz_path)
-    vv = _undirected(z["vv_edge"])
+    # take the stored canonical undirected edge list AS-IS: vv_dist / vv_cos are aligned to it
+    # column-for-column, and re-uniquing it would risk silently reordering the features
+    vv = np.asarray(z["vv_edge"]).T.astype(np.int64) if z["vv_edge"].shape[1] else \
+        np.zeros((0, 2), np.int64)
+    if len(vv) != len(z["vv_dist"]):
+        raise ValueError("vv_edge %d != vv_dist %d" % (len(vv), len(z["vv_dist"])))
     va = (np.stack([z["va_v"], z["va_a"]], 1).astype(np.int64)
           if len(z["va_v"]) else np.zeros((0, 2), np.int64))
     aa = _undirected(z["aa_edge"])
@@ -66,7 +75,12 @@ def _side_from_npz(npz_path, vert_xyz, faces, normals, atom_xyz, atom_elem):
         "faces": np.asarray(faces, np.int64),
         "aa_edge": aa, "aa_order": z["aa_order"][idx] if len(idx) else np.zeros((0, 4), np.float32),
         "aa_rot": z["aa_rot"][idx] if len(idx) else np.zeros(0, np.float32),
-        "vv_edge": vv, "va_edge": va,
+        "vv_edge": vv,
+        "vv_dist": np.asarray(z["vv_dist"], np.float32),
+        "vv_cos": np.asarray(z["vv_cos"], np.float32),
+        "va_edge": va,
+        "va_dist": np.asarray(z["va_dist"], np.float32),
+        "va_cos": np.asarray(z["va_cos"], np.float32),
         "surf_node_idx": z["surf_node_idx"].astype(np.int64),
     }
 
@@ -154,7 +168,7 @@ def _finish(cid, outdir, left, right, pos, kind, lresid, lname,
         fh.write("\n".join(lines) + "\nEND\n")
 
     meta = {"id": cid, "kind": kind, "atom_features": ATOM_FEATURES,
-            "vert_features": VERT_FEATURES, "elements": ELEMENTS,
+            "vert_features": VERT_FEATURES, "edge_features": EDGE_FEATURES, "elements": ELEMENTS,
             "left_label": "protein A", "right_label": "ligand B" if kind == "pl" else "protein B",
             "left": {"atoms": int(len(left["atom_xyz"])), "verts": int(len(left["vert_xyz"])),
                      "faces": int(len(left["faces"])), "surf_atoms": int(len(left["surf_node_idx"])),

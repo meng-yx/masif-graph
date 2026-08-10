@@ -49,12 +49,30 @@ Everything comes in a `_left` / `_right` pair that toggles independently.
 | `atom_<feature>_{left,right}` | one object per remaining atom-node feature — `is_ligand`, `is_backbone`, `aromatic`, `degree`, `is_surface`, `in_ring`, `hbond_donor`, `hbond_acceptor`, `formal_charge`, `flex_depth`, `electronegativity`, `valence`, `covalent_radius` |
 | `edges_aa_{left,right}` | atom–atom covalent edges, coloured by **bond order** (white=single, blue=double, orange=aromatic, purple=other) |
 | `edges_aa_rot_{left,right}` | the **sidechain-rotatable** subset only (magenta) — the bond-rotatability signal |
-| `edges_vv_{left,right}` | vertex–vertex mesh edges (via `masif_edges`) |
-| `edges_va_{left,right}` | vertex→atom edges (via `masif_edges`) |
+| `edges_vv_{dist,cos}_{left,right}` | vertex–vertex mesh edges, coloured by their **edge features** (via `masif_edges`) |
+| `edges_va_{dist,cos}_{left,right}` | vertex→atom edges, likewise (via `masif_edges`) |
 | `contacts` | the training positives linking left to right |
 
 That is every feature the GNN consumes: the 26-D atom node vector, the 4-D vertex node vector, and
-all three edge types with their edge features. 47 objects in total.
+all three edge types **with their edge features**. 51 objects in total.
+
+### Edges are not connectivity-only
+
+Each edge carries a feature vector that is concatenated with the source node state inside the
+message MLP — `msg(concat[h_src, edge_feat])` — so these values are as much an input as the node
+features are:
+
+| edge type | dim | contents |
+|---|---|---|
+| `aa` atom–atom (covalent) | 5 | bond-order one-hot ×4 (single / double / aromatic / other) **+ sidechain-rotatable flag** |
+| `vv` vertex–vertex (mesh) | 9 | edge length → RBF (8 Gaussians, centres 0–4 Å) + cos(normal_i, normal_j) |
+| `va` vertex→atom | 9 | distance → RBF (8 Gaussians, 0–5 Å) + cos(normal_v, unit(atom − vertex)) |
+
+Every one of them is an **SE(3)-invariant scalar** — a distance or a cosine. No coordinate ever
+enters the network, which is what makes the encoder provably rotation-invariant. The atom→vertex
+direction reuses the same `va` feature with a *separate* MLP, so direction is distinguished by the
+function rather than by the feature. The `sidechain_rotatable` flag is the bond-rotatability signal
+the project is built around — see it on its own with `masif_show edges_aa_rot`.
 
 Objects are created **feature-major**, so `<feature>_left` and `<feature>_right` sit next to each
 other in the panel:
@@ -101,7 +119,9 @@ for them with `masif_edges`.
   ligand mostly red: complementarity is convex-meets-concave.
 * `contacts` — should fan across the whole buried face of the ligand, not cluster on one spot.
 * `atom_is_surface` — red atoms are the readout nodes the encoder actually emits embeddings for.
-* `edges_va` — should link each vertex to the atoms directly beneath it, not across the molecule.
+* `edges_va_dist` — should link each vertex to the atoms directly beneath it (blue = near), never
+  across the molecule; the 5 Å ball cut-off is visible as the reddest edges.
+* `edges_aa` — bond order by colour; `edges_aa_rot` isolates the rotatable bonds.
 
 ## The five pairs
 

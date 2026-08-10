@@ -30,8 +30,8 @@ Objects
     atom_hybridization_{left,right}               sp / sp2 / sp3 (categorical)
     edges_aa_{left,right}                         atom-atom covalent edges, coloured by bond order
     edges_aa_rot_{left,right}                     the rotatable-bond subset only
-    edges_vv_{left,right}                         vertex-vertex mesh edges
-    edges_va_{left,right}                         vertex->atom edges
+    edges_vv_{dist,cos}_{left,right}              mesh edges, coloured by their edge FEATURES
+    edges_va_{dist,cos}_{left,right}              vertex->atom edges, likewise
     contacts                                      the training positives linking left to right
 
 Scalar channels use a blue -> white -> red ramp over the channel's own range, printed on load, and
@@ -217,21 +217,38 @@ def _build_all(z, meta, dense):
 
 
 def _build_edges(z):
-    """The dense mesh / vertex-atom edge layers, left and right adjacent."""
+    """Dense mesh / vertex-atom layers, COLOURED BY THEIR EDGE FEATURES.
+
+    vv and va edges are not bare connectivity: each carries a distance (RBF-expanded before the
+    message MLP) and a cos-angle. Both are drawn, so every scalar the GNN sees on an edge is
+    visible. Ranges are shared left/right, as for the node features."""
     made = []
     have = set(cmd.get_names("objects"))
-    for kind, col, w in (("vv", (0.55, 0.55, 0.55), 1.0), ("va", (1.0, 0.95, 0.10), 1.0)):
-        for tag in ("left", "right"):
-            nm = "edges_%s_%s" % (kind, tag)
-            if nm in have:
+    for kind in ("vv", "va"):
+        for feat in ("dist", "cos"):
+            key = "%s_%s" % (kind, feat)
+            vals = [z["%s_%s" % (t, key)] for t in ("left", "right")
+                    if len(z["%s_%s_edge" % (t, kind)])]
+            if not vals:
                 continue
-            e = z["%s_%s_edge" % (tag, kind)]
-            if not len(e):
-                continue
-            src = z["%s_vert_xyz" % tag]
-            dst = z["%s_vert_xyz" % tag] if kind == "vv" else z["%s_atom_xyz" % tag]
-            cmd.load_cgo(_lines(src[e[:, 0]], dst[e[:, 1]], [col] * len(e), w), nm)
-            made.append(nm)
+            v = np.concatenate(vals)
+            lo, hi = float(v.min()), float(v.max())
+            if lo < 0 < hi:
+                m = max(abs(lo), abs(hi)); lo, hi = -m, m
+            if hi - lo < 1e-9:
+                hi = lo + 1e-9
+            for tag in ("left", "right"):
+                nm = "edges_%s_%s_%s" % (kind, feat, tag)
+                if nm in have:
+                    continue
+                e = z["%s_%s_edge" % (tag, kind)]
+                if not len(e):
+                    continue
+                t = _scale(z["%s_%s" % (tag, key)], lo, hi)
+                src = z["%s_vert_xyz" % tag]
+                dst = z["%s_vert_xyz" % tag] if kind == "vv" else z["%s_atom_xyz" % tag]
+                cmd.load_cgo(_lines(src[e[:, 0]], dst[e[:, 1]], [_ramp(x) for x in t], 1.0), nm)
+                made.append(nm)
     return made
 
 
@@ -302,7 +319,11 @@ def masif_pair(npz_path, dense=0):
           % ", ".join("%s[%.2f,%.2f]" % (k.split("_", 1)[1], v[0], v[1])
                       for k, v in rr.items() if k.startswith("vert_")))
     print("[masif] masif_show <prefix>   e.g. vert_charge | vert_hphob | atom_hbond_donor | edges_aa")
-    print("[masif] masif_edges           build the dense vv/va layers")
+    print("[masif] masif_edges           build the dense vv/va layers (coloured by edge features)")
+    ef = meta.get("edge_features", {})
+    for k in ("aa", "vv", "va"):
+        if k in ef:
+            print("        edge %-2s features: %s" % (k, "; ".join(ef[k])))
     print("[masif] atom features: %s" % ", ".join(meta["atom_features"]))
 
 
