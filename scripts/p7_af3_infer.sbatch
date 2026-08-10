@@ -7,7 +7,7 @@
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-task=16
 #SBATCH --mem=90G
-#SBATCH --time=02:00:00
+#SBATCH --time=01:00:00
 #SBATCH --output=/work/upthomae/Meng/phase7_af3/logs/inf-%A_%a.out
 set -u
 SIF=/work/upthomae/Meng/AlphaPulldown/container/alphafold3.sif
