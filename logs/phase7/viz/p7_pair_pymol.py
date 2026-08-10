@@ -15,7 +15,6 @@ or, inside PyMOL:
     masif_pair pl6ibk.npz           # load a pair
     masif_pair pl6ibk.npz, dense=1  # also build the vv/va edge layers up front
     masif_show vert_charge          # enable vert_charge_left + vert_charge_right, hide the rest
-    masif_show surf_si
     masif_show atom_hbond_donor
     masif_edges                     # build the dense edge layers on demand
 
@@ -24,8 +23,8 @@ Objects
     structure                     the PDB — EXACTLY the atoms that are graph nodes, in node order
                                   (chain A = left, chain L/B = right)
 
-    surf_{si,hbond,charge,hphob}_{left,right}     surface, colour-coded by that vertex channel
-    vert_{si,hbond,charge,hphob}_{left,right}     the same channel as coloured vertex NODES
+    vert_{si,hbond,charge,hphob}_{left,right}     per-VERTEX NODE features, drawn as a shaded
+                                  surface for legibility (the surface itself is not a GNN input)
     atom_<feature>_{left,right}                   every one of the 26 atom-node features
     atom_element_{left,right}                     element identity (categorical)
     atom_hybridization_{left,right}               sp / sp2 / sp3 (categorical)
@@ -39,8 +38,9 @@ Scalar channels use a blue -> white -> red ramp over the channel's own range, pr
 the SAME range is used for left and right so the two sides are directly comparable. Binary features
 are grey (0) / red (1).
 
-Only `structure`, `surf_si_*` and `contacts` are enabled at start; everything else is built and
-disabled so the session opens responsive. Toggle in the object panel or use `masif_show`.
+Objects are created FEATURE-MAJOR, so `<feature>_left` and `<feature>_right` sit next to each other
+in the panel. Only `structure`, `vert_si_*` and `contacts` are enabled at start; everything else is
+built and disabled so the session opens responsive. Toggle in the panel or use `masif_show`.
 """
 from __future__ import annotations
 
@@ -57,7 +57,7 @@ try:
 except ImportError as exc:                                          # pragma: no cover
     raise ImportError("this script needs numpy inside PyMOL's Python: %s" % exc)
 
-_S = {"npz": None, "meta": None}
+_S = {"npz": None, "meta": None, "ranges": {}}
 
 _ELEM_RGB = {"C": (0.30, 0.30, 0.32), "N": (0.20, 0.35, 0.95), "O": (0.90, 0.15, 0.15),
              "S": (0.90, 0.78, 0.20), "P": (1.00, 0.55, 0.10), "F": (0.35, 0.85, 0.35),
@@ -118,76 +118,120 @@ def _lines(pa, pb, cols, width=1.0):
     return obj
 
 
-def _build_side(z, tag, meta, dense):
-    """Create every per-side object for one partner. Returns the names created."""
+def _rng(z, key, k):
+    """Colour range shared by BOTH partners for one channel.
+
+    Scaling each side to itself would make the two partners look comparable when they are not --
+    the point of a shared encoder is that a value means the same thing on either side."""
+    vals = []
+    for tag in ("left", "right"):
+        a = z["%s_%s" % (tag, key)]
+        if len(a):
+            vals.append(a[:, k])
+    if not vals:
+        return 0.0, 1.0
+    v = np.concatenate(vals)
+    lo, hi = float(v.min()), float(v.max())
+    if hi - lo < 1e-9:
+        return lo - 1e-9, hi + 1e-9
+    if lo < 0 < hi:                      # signed -> symmetric about 0 so white means zero
+        m = max(abs(lo), abs(hi))
+        return -m, m
+    return lo, hi
+
+
+def _scale(v, lo, hi):
+    return 2.0 * (np.asarray(v, float) - lo) / (hi - lo) - 1.0
+
+
+def _build_all(z, meta, dense):
+    """Create every object, FEATURE-MAJOR so <feature>_left and <feature>_right are adjacent."""
     made = []
-    axyz = z["%s_atom_xyz" % tag]
-    af = z["%s_atom_feat" % tag]
-    vxyz = z["%s_vert_xyz" % tag]
-    vn = z["%s_vert_normal" % tag]
-    vf = z["%s_vert_feat" % tag]
-    faces = z["%s_faces" % tag]
-    names = meta["atom_features"]
+    A = {t: z["%s_atom_xyz" % t] for t in ("left", "right")}
+    V = {t: z["%s_vert_xyz" % t] for t in ("left", "right")}
+    ranges = {}
 
-    # ---- vertex channels: as a coloured SURFACE and as coloured vertex NODES ----
+    # ---- vertex channels ----
+    # Named `vert_*` because in the GNN these are per-VERTEX NODE features: `vert_feat` is an
+    # (n_vert, 4) tensor on vertex nodes. The triangulated surface is NOT a model input -- the npz
+    # the encoder reads has no faces at all. The mesh reaches the network only as vv-edge
+    # connectivity plus the edge scalars derived from it. It is drawn as a surface here purely
+    # because a shaded surface is far easier to read than a point cloud.
     for k, ch in enumerate(meta["vert_features"]):
-        if len(vxyz) == 0:
-            continue
-        t, lo, hi = _norm(vf[:, k])
-        if len(faces):
-            cmd.load_cgo(_surface(vxyz, faces, vn, t), "surf_%s_%s" % (ch, tag))
-            made.append("surf_%s_%s" % (ch, tag))
-        cmd.load_cgo(_spheres(vxyz, [_ramp(x) for x in t], _VERT_R), "vert_%s_%s" % (ch, tag))
-        made.append("vert_%s_%s" % (ch, tag))
+        lo, hi = _rng(z, "vert_feat", k)
+        ranges["vert_" + ch] = (lo, hi)
+        for tag in ("left", "right"):
+            if len(V[tag]) == 0:
+                continue
+            t = _scale(z["%s_vert_feat" % tag][:, k], lo, hi)
+            faces = z["%s_faces" % tag]
+            nm = "vert_%s_%s" % (ch, tag)
+            if len(faces):
+                cmd.load_cgo(_surface(V[tag], faces, z["%s_vert_normal" % tag], t), nm)
+            else:                     # no mesh available -> fall back to the raw node cloud
+                cmd.load_cgo(_spheres(V[tag], [_ramp(x) for x in t], _VERT_R), nm)
+            made.append(nm)
 
-    # ---- atom features: element + hybridization categorical, the rest as scalar ramps ----
-    el = af[:, 0:10]
-    ei = el.argmax(1)
-    cmd.load_cgo(_spheres(axyz, [_ELEM_RGB.get(meta["elements"][i], (1, 0, 1)) for i in ei],
-                          _ATOM_R), "atom_element_%s" % tag)
-    made.append("atom_element_%s" % tag)
-    hy = af[:, 16:19]
-    hcol = [(0.4, 0.4, 0.4), (0.95, 0.45, 0.1), (0.15, 0.55, 0.95)]
-    cmd.load_cgo(_spheres(axyz, [hcol[i] if hy[j].max() > 0 else (0.85, 0.85, 0.85)
-                                 for j, i in enumerate(hy.argmax(1))], _ATOM_R),
-                 "atom_hybridization_%s" % tag)
-    made.append("atom_hybridization_%s" % tag)
+    # ---- atom nodes: categorical first, then every scalar feature ----
+    for tag in ("left", "right"):
+        ei = z["%s_atom_feat" % tag][:, 0:10].argmax(1)
+        cmd.load_cgo(_spheres(A[tag], [_ELEM_RGB.get(meta["elements"][i], (1, 0, 1)) for i in ei],
+                              _ATOM_R), "atom_element_%s" % tag)
+        made.append("atom_element_%s" % tag)
+    hcol = [(0.40, 0.40, 0.40), (0.95, 0.45, 0.10), (0.15, 0.55, 0.95)]
+    for tag in ("left", "right"):
+        hy = z["%s_atom_feat" % tag][:, 16:19]
+        cmd.load_cgo(_spheres(A[tag], [hcol[i] if hy[j].max() > 0 else (0.85, 0.85, 0.85)
+                                       for j, i in enumerate(hy.argmax(1))], _ATOM_R),
+                     "atom_hybridization_%s" % tag)
+        made.append("atom_hybridization_%s" % tag)
+    names = meta["atom_features"]
     for k in list(range(10, 16)) + list(range(19, 26)):
-        t, lo, hi = _norm(af[:, k])
-        cmd.load_cgo(_spheres(axyz, [_ramp(x) for x in t], _ATOM_R),
-                     "atom_%s_%s" % (names[k], tag))
-        made.append("atom_%s_%s" % (names[k], tag))
+        lo, hi = _rng(z, "atom_feat", k)
+        ranges["atom_" + names[k]] = (lo, hi)
+        for tag in ("left", "right"):
+            t = _scale(z["%s_atom_feat" % tag][:, k], lo, hi)
+            cmd.load_cgo(_spheres(A[tag], [_ramp(x) for x in t], _ATOM_R),
+                         "atom_%s_%s" % (names[k], tag))
+            made.append("atom_%s_%s" % (names[k], tag))
 
     # ---- edges ----
-    aa = z["%s_aa_edge" % tag]
-    if len(aa):
-        order = z["%s_aa_order" % tag].argmax(1)
-        cmd.load_cgo(_lines(axyz[aa[:, 0]], axyz[aa[:, 1]],
-                            [_BOND_RGB[o] for o in order], 2.5), "edges_aa_%s" % tag)
-        made.append("edges_aa_%s" % tag)
-        rot = z["%s_aa_rot" % tag] > 0.5
-        if rot.any():
-            cmd.load_cgo(_lines(axyz[aa[rot, 0]], axyz[aa[rot, 1]],
+    for tag in ("left", "right"):
+        aa = z["%s_aa_edge" % tag]
+        if len(aa):
+            order = z["%s_aa_order" % tag].argmax(1)
+            cmd.load_cgo(_lines(A[tag][aa[:, 0]], A[tag][aa[:, 1]],
+                                [_BOND_RGB[o] for o in order], 2.5), "edges_aa_%s" % tag)
+            made.append("edges_aa_%s" % tag)
+    for tag in ("left", "right"):
+        aa = z["%s_aa_edge" % tag]
+        rot = z["%s_aa_rot" % tag] > 0.5 if len(aa) else np.zeros(0, bool)
+        if len(aa) and rot.any():
+            cmd.load_cgo(_lines(A[tag][aa[rot, 0]], A[tag][aa[rot, 1]],
                                 [(1.0, 0.2, 0.8)] * int(rot.sum()), 3.0), "edges_aa_rot_%s" % tag)
             made.append("edges_aa_rot_%s" % tag)
     if dense:
-        made += _build_edges_side(z, tag)
+        made += _build_edges(z)
+    _S["ranges"] = ranges
     return made
 
 
-def _build_edges_side(z, tag):
+def _build_edges(z):
+    """The dense mesh / vertex-atom edge layers, left and right adjacent."""
     made = []
-    axyz = z["%s_atom_xyz" % tag]; vxyz = z["%s_vert_xyz" % tag]
-    vv = z["%s_vv_edge" % tag]
-    if len(vv) and not cmd.get_names("objects", 0).count("edges_vv_%s" % tag):
-        cmd.load_cgo(_lines(vxyz[vv[:, 0]], vxyz[vv[:, 1]],
-                            [(0.55, 0.55, 0.55)] * len(vv), 1.0), "edges_vv_%s" % tag)
-        made.append("edges_vv_%s" % tag)
-    va = z["%s_va_edge" % tag]
-    if len(va):
-        cmd.load_cgo(_lines(vxyz[va[:, 0]], axyz[va[:, 1]],
-                            [(1.0, 0.95, 0.10)] * len(va), 1.0), "edges_va_%s" % tag)
-        made.append("edges_va_%s" % tag)
+    have = set(cmd.get_names("objects"))
+    for kind, col, w in (("vv", (0.55, 0.55, 0.55), 1.0), ("va", (1.0, 0.95, 0.10), 1.0)):
+        for tag in ("left", "right"):
+            nm = "edges_%s_%s" % (kind, tag)
+            if nm in have:
+                continue
+            e = z["%s_%s_edge" % (tag, kind)]
+            if not len(e):
+                continue
+            src = z["%s_vert_xyz" % tag]
+            dst = z["%s_vert_xyz" % tag] if kind == "vv" else z["%s_atom_xyz" % tag]
+            cmd.load_cgo(_lines(src[e[:, 0]], dst[e[:, 1]], [col] * len(e), w), nm)
+            made.append(nm)
     return made
 
 
@@ -196,10 +240,7 @@ def masif_edges():
     if _S["npz"] is None:
         print("[masif] load a pair first")
         return
-    z = np.load(_S["npz"])
-    made = []
-    for tag in ("left", "right"):
-        made += _build_edges_side(z, tag)
+    made = _build_edges(np.load(_S["npz"]))
     for m in made:
         cmd.disable(m)
     print("[masif] built %s (disabled; enable in the panel)" % ", ".join(made) if made else
@@ -224,9 +265,7 @@ def masif_pair(npz_path, dense=0):
         cmd.color("grey60", "structure")
         cmd.util.cnc("structure")
 
-    made = []
-    for tag in ("left", "right"):
-        made += _build_side(z, tag, meta, int(dense))
+    made = _build_all(z, meta, int(dense))
 
     ca = z["contacts_atom"]
     if len(ca):
@@ -236,11 +275,11 @@ def masif_pair(npz_path, dense=0):
         made.append("contacts")
 
     cmd.set("two_sided_lighting", 1); cmd.set("ray_shadows", 0); cmd.bg_color("white")
-    keep = {"structure", "surf_si_left", "surf_si_right", "contacts"}
+    keep = {"structure", "vert_si_left", "vert_si_right", "contacts"}
     for m in made:
         if m not in keep:
             cmd.disable(m)
-    cmd.orient("structure" if os.path.exists(pdb) else "surf_si_left")
+    cmd.orient("structure" if os.path.exists(pdb) else "vert_si_left")
 
     L, R = meta["left"], meta["right"]
     print("[masif] %s (%s)" % (meta["id"], meta["kind"]))
@@ -249,8 +288,20 @@ def masif_pair(npz_path, dense=0):
     print("        right = %-10s atoms %5d  verts %5d  surf-atoms %4d  aa %5d  vv %6d  va %6d"
           % (meta["right_label"], R["atoms"], R["verts"], R["surf_atoms"], R["aa"], R["vv"], R["va"]))
     print("        contacts (training positives): %d" % meta["n_contacts"])
-    print("[masif] %d objects. shown: structure, surf_si_left/right, contacts" % len(made))
-    print("[masif] masif_show <prefix>   e.g. vert_charge | surf_hphob | atom_hbond_donor | edges_aa")
+    print("[masif] %d objects, ordered feature-major (<feature>_left, <feature>_right, ...)."
+          % len(made))
+    print("        shown at start: structure, vert_si_left/right, contacts")
+    print("[masif] WHAT THE GNN CONSUMES: atom-node features (26-D), vertex-node features (4-D),")
+    print("        and 3 edge types. vert_<ch>_* are per-VERTEX NODE features -- drawn as a shaded")
+    print("        surface only because it reads better than a point cloud. The triangulated")
+    print("        surface itself is NOT an input: the npz the encoder reads has no faces. The")
+    print("        mesh reaches the network only as vv-edge connectivity plus the edge scalars")
+    print("        (vv_dist/vv_cos, va_dist/va_cos) and si, all derived from its geometry.")
+    rr = _S.get("ranges", {})
+    print("[masif] shared left/right colour ranges: %s"
+          % ", ".join("%s[%.2f,%.2f]" % (k.split("_", 1)[1], v[0], v[1])
+                      for k, v in rr.items() if k.startswith("vert_")))
+    print("[masif] masif_show <prefix>   e.g. vert_charge | vert_hphob | atom_hbond_donor | edges_aa")
     print("[masif] masif_edges           build the dense vv/va layers")
     print("[masif] atom features: %s" % ", ".join(meta["atom_features"]))
 
@@ -264,7 +315,7 @@ def masif_show(prefix):
             continue
         if n in ("%s_left" % prefix, "%s_right" % prefix):
             cmd.enable(n)
-        elif n.startswith(("surf_", "vert_", "atom_", "edges_")):
+        elif n.startswith(("vert_", "atom_", "edges_")):
             cmd.disable(n)
     hits = [n for n in names if n in ("%s_left" % prefix, "%s_right" % prefix)]
     print("[masif] showing %s" % (", ".join(hits) if hits else "(nothing matched %r)" % prefix))
