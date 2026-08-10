@@ -81,6 +81,33 @@ def run(args):
             c = g["coord"].cpu().numpy()
             near = np.flatnonzero(tree.query_ball_point(c, args.lig_radius, return_length=True) > 0)
             meta[s][pid] = {"near": near, "n_surf": c.shape[0]}
+    # Phase-7: the COMPOSITE protein+drug surface as an alternative query representation. Loaded
+    # into the same centering pool so it sits on one scale with everything else, but deliberately
+    # NOT added to the DB -- a composite entry would trivially match itself.
+    cmp_meta = {}
+    if getattr(args, "composite_data", None):
+        from masif_graph.p6.neosurf import parse_benchmark
+        chain_of = {}
+        for e in parse_benchmark(args.bench):
+            chain_of[(e["sys"], "p1")] = e["c1"]; chain_of[(e["sys"], "p2")] = e["c2"]
+        for s_ in sys_ids:
+            lig_xyz = load_chain_graph(os.path.join(args.neosurf_data, f"{s_}__lig.npz"),
+                                       dev)["coord"].cpu().numpy()
+            tree = cKDTree(lig_xyz)
+            for qr in ("p1", "p2"):
+                ch = chain_of.get((s_, qr))
+                p = os.path.join(args.composite_data, f"{s_}_{ch}__cmp.npz")
+                if ch is None or not os.path.exists(p):
+                    continue
+                g = load_chain_graph(p, dev)
+                raw[("cmp", s_, qr)] = enc(g)
+                zc = np.load(p)
+                is_lig = zc["readout_is_lig"].astype(bool)
+                co = g["coord"].cpu().numpy()
+                near = np.flatnonzero((tree.query_ball_point(co, args.lig_radius,
+                                                             return_length=True) > 0) & ~is_lig)
+                cmp_meta[(s_, qr)] = {"near": near, "is_lig": np.flatnonzero(is_lig),
+                                      "n_readout": len(co)}
     decoys = decoy_chains(args.decoy_data, args.decoy_ids, args.max_decoys)
     for name, path in decoys:
         g = load_chain_graph(path, dev)
@@ -105,6 +132,8 @@ def run(args):
 
     dbk, mats, seg = [], [], []
     for key in list(raw):
+        if key[0] == "cmp":
+            continue
         if key[0] == "decoy" or key[1] in ("p1", "p2"):
             m = cap(emb[key])
             if m.shape[0] == 0:
@@ -133,6 +162,20 @@ def run(args):
         target = idx_of[(s, "p2" if qr == "p1" else "p1")]
         return order.index(target) + 1
 
+    def rank_case_cmp(s_, qr, with_ligand):
+        m = cmp_meta.get((s_, qr))
+        if m is None or len(m["near"]) == 0:
+            return None
+        z = emb[("cmp", s_, qr)]
+        idx = m["near"] if not with_ligand else np.concatenate([m["near"], m["is_lig"]])
+        q = z[torch.as_tensor(idx, dtype=torch.long, device=z.device)]
+        S = torch.full((q.shape[0], n_db), float("-inf"), device=q.device)
+        S.scatter_reduce_(1, seg.expand(q.shape[0], -1), q @ TZ, reduce="amax", include_self=True)
+        score = S.median(0).values
+        score[idx_of[(s_, qr)]] = float("-inf")
+        order = torch.argsort(score, descending=True).tolist()
+        return order.index(idx_of[(s_, "p2" if qr == "p1" else "p1")]) + 1
+
     out = {"ckpt": os.path.basename(args.ckpt), "n_systems": len(sys_ids), "db_chains": n_db,
            "n_decoys": len(decoys), "lig_radius": args.lig_radius, "center": args.center,
            "z_std": z_std, "cases": []}
@@ -142,12 +185,19 @@ def run(args):
             r_without = rank_case(s, qr, False)
             if r_with is None:
                 continue
-            out["cases"].append({"system": s, "query": qr, "n_near": int(len(meta[s][qr]["near"])),
-                                 "n_lig": int(emb[(s, "lig")].shape[0]),
-                                 "rank_with_ligand": r_with, "rank_no_ligand": r_without})
+            case = {"system": s, "query": qr, "n_near": int(len(meta[s][qr]["near"])),
+                    "n_lig": int(emb[(s, "lig")].shape[0]),
+                    "rank_with_ligand": r_with, "rank_no_ligand": r_without}
+            if (s, qr) in cmp_meta:
+                case["rank_composite"] = rank_case_cmp(s, qr, True)
+                case["rank_composite_noligand"] = rank_case_cmp(s, qr, False)
+                case["n_near_composite"] = int(len(cmp_meta[(s, qr)]["near"]))
+            out["cases"].append(case)
 
     def summ(key):
-        r = np.array([c[key] for c in out["cases"]], float)
+        r = np.array([c[key] for c in out["cases"] if c.get(key) is not None], float)
+        if len(r) == 0:
+            return {"n": 0}
         return {"n": len(r), "top1": float((r <= 1).mean()), "top5": float((r <= 5).mean()),
                 "top10": float((r <= 10).mean()), "top20": float((r <= 20).mean()),
                 "mrr": float((1 / r).mean()), "median_rank": float(np.median(r))}
@@ -178,6 +228,12 @@ def run(args):
 
     out["with_ligand"] = summ("rank_with_ligand")
     out["no_ligand"] = summ("rank_no_ligand")
+    if cmp_meta:
+        # composite = the drug and the protein share ONE surface (a real neosurface);
+        # composite_noligand isolates "the drug reshaped the protein surface" from
+        # "the drug contributed its own embeddings".
+        out["composite"] = summ("rank_composite")
+        out["composite_noligand"] = summ("rank_composite_noligand")
     if frozen_ok:
         out["frozen"] = summ("rank_frozen")
     out["chance_top5"] = round(5.0 / max(n_db - 1, 1), 5)
@@ -215,6 +271,10 @@ def main():
     ap.add_argument("--ckpt", required=True)
     ap.add_argument("--center", action="store_true")
     ap.add_argument("--lig-radius", type=float, default=6.0)
+    ap.add_argument("--composite-data", default=None,
+                    help="Phase-7 composite protein+drug graphs (query side only)")
+    ap.add_argument("--bench", default="/scratch/ymeng/masif-graph/masif-neosurf-af2/"
+                                       "computational_benchmark/benchmark_pdbs.txt")
     ap.add_argument("--max-decoys", type=int, default=0)
     ap.add_argument("--max-db-atoms", type=int, default=1500)
     ap.add_argument("--out", default=None)
