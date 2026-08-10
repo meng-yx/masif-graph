@@ -13,10 +13,10 @@ or, inside PyMOL:
     run p7_pair_pymol.py
     masif_list .                    # what is in this folder
     masif_pair pl6ibk.npz           # load a pair
-    masif_pair pl6ibk.npz, dense=1  # also build the vv/va edge layers up front
+    masif_pair pl6ibk.npz, dense=0  # skip the dense vv/va edge layers (they are ~0.2 s)
     masif_show vert_charge          # enable vert_charge_left + vert_charge_right, hide the rest
     masif_show atom_hbond_donor
-    masif_edges                     # build the dense edge layers on demand
+    masif_edges                     # (re)build the dense edge layers if they were skipped
 
 Objects
 -------
@@ -39,8 +39,9 @@ the SAME range is used for left and right so the two sides are directly comparab
 are grey (0) / red (1).
 
 Objects are created FEATURE-MAJOR, so `<feature>_left` and `<feature>_right` sit next to each other
-in the panel. Only `structure`, `vert_si_*` and `contacts` are enabled at start; everything else is
-built and disabled so the session opens responsive. Toggle in the panel or use `masif_show`.
+in the panel. ALL of them are built (including the dense vv/va edge layers), but only `structure`,
+`vert_si_*` and `contacts` start *enabled* so the session opens responsive — the rest are present in
+the panel, just switched off. Toggle there or use `masif_show`.
 """
 from __future__ import annotations
 
@@ -264,7 +265,7 @@ def masif_edges():
           "[masif] nothing to build")
 
 
-def masif_pair(npz_path, dense=0):
+def masif_pair(npz_path, dense=1):
     npz_path = os.path.abspath(str(npz_path).strip())
     if not os.path.exists(npz_path):
         print("[masif] no such file: %s" % npz_path)
@@ -318,7 +319,7 @@ def masif_pair(npz_path, dense=0):
           % ", ".join("%s[%.2f,%.2f]" % (k.split("_", 1)[1], v[0], v[1])
                       for k, v in rr.items() if k.startswith("vert_")))
     print("[masif] masif_show <prefix>   e.g. vert_charge | vert_hphob | atom_hbond_donor | edges_aa")
-    print("[masif] masif_edges           build the dense vv/va layers (coloured by edge features)")
+    print("[masif] masif_edges           rebuild the vv/va layers if loaded with dense=0")
     ef = meta.get("edge_features", {})
     for k in ("aa", "vv", "va"):
         if k in ef:
