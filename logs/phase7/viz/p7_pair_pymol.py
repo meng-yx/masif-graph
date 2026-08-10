@@ -59,7 +59,7 @@ except ImportError as exc:                                          # pragma: no
 
 _S = {"npz": None, "meta": None, "ranges": {}}
 
-_ELEM_RGB = {"C": (0.30, 0.30, 0.32), "N": (0.20, 0.35, 0.95), "O": (0.90, 0.15, 0.15),
+_ELEM_RGB = {"C": (0.62, 0.62, 0.66), "N": (0.20, 0.35, 0.95), "O": (0.90, 0.15, 0.15),
              "S": (0.90, 0.78, 0.20), "P": (1.00, 0.55, 0.10), "F": (0.35, 0.85, 0.35),
              "Cl": (0.55, 0.75, 0.25), "Br": (0.65, 0.35, 0.15), "I": (0.55, 0.25, 0.70),
              "other": (0.90, 0.20, 0.90)}
@@ -178,7 +178,7 @@ def _build_all(z, meta, dense):
         cmd.load_cgo(_spheres(A[tag], [_ELEM_RGB.get(meta["elements"][i], (1, 0, 1)) for i in ei],
                               _ATOM_R), "atom_element_%s" % tag)
         made.append("atom_element_%s" % tag)
-    hcol = [(0.40, 0.40, 0.40), (0.95, 0.45, 0.10), (0.15, 0.55, 0.95)]
+    hcol = [(0.70, 0.70, 0.70), (0.95, 0.45, 0.10), (0.15, 0.55, 0.95)]
     for tag in ("left", "right"):
         hy = z["%s_atom_feat" % tag][:, 16:19]
         cmd.load_cgo(_spheres(A[tag], [hcol[i] if hy[j].max() > 0 else (0.85, 0.85, 0.85)
@@ -277,10 +277,9 @@ def masif_pair(npz_path, dense=0):
     pdb = npz_path[:-4] + ".pdb"
     if os.path.exists(pdb):
         cmd.load(pdb, "structure")
-        cmd.hide("everything", "structure")
-        cmd.show("lines", "structure")
-        cmd.color("grey60", "structure")
-        cmd.util.cnc("structure")
+        cmd.show_as("lines", "structure")
+        cmd.util.cbc("structure")      # carbons by chain -> left (A) and right (L/B) differ
+        cmd.util.cnc("structure")      # heteroatoms by element
 
     made = _build_all(z, meta, int(dense))
 
@@ -291,7 +290,7 @@ def masif_pair(npz_path, dense=0):
                      "contacts")
         made.append("contacts")
 
-    cmd.set("two_sided_lighting", 1); cmd.set("ray_shadows", 0); cmd.bg_color("white")
+    cmd.set("two_sided_lighting", 1); cmd.set("ray_shadows", 0)
     keep = {"structure", "vert_si_left", "vert_si_right", "contacts"}
     for m in made:
         if m not in keep:

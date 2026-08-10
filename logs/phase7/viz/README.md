@@ -42,7 +42,7 @@ Everything comes in a `_left` / `_right` pair that toggles independently.
 
 | object | what |
 |---|---|
-| `structure` | the PDB — the actual graph nodes, as a normal PyMOL molecular model |
+| `structure` | the PDB — the actual graph nodes, shown as **lines coloured by chain** (carbons) and by element (heteroatoms), so left and right are distinguishable |
 | `vert_{si,hbond,charge,hphob}_{left,right}` | the four per-**vertex-node** features, drawn as a shaded surface (see below) |
 | `atom_element_{left,right}` | element identity (categorical, CPK-ish) |
 | `atom_hybridization_{left,right}` | sp / sp2 / sp3 (categorical) |
@@ -103,7 +103,7 @@ cloud, but the number it shows lives on a vertex node.
 
 ## Colour scales
 
-Scalar channels use **blue → white → red**. The scale is symmetric about 0 for signed channels, and
+The background is left at PyMOL's default (black). Scalar channels use **blue → white → red**. The scale is symmetric about 0 for signed channels, and
 the **same range is applied to left and right**, so the two partners are directly comparable rather
 than each auto-scaled to itself. Binary features read grey (0) / red (1).
 
