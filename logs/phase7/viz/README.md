@@ -47,8 +47,8 @@ Everything comes in a `_left` / `_right` pair that toggles independently.
 | `atom_element_{left,right}` | element identity (categorical, CPK-ish) |
 | `atom_hybridization_{left,right}` | sp / sp2 / sp3 (categorical) |
 | `atom_<feature>_{left,right}` | one object per remaining atom-node feature — `is_ligand`, `is_backbone`, `aromatic`, `degree`, `is_surface`, `in_ring`, `hbond_donor`, `hbond_acceptor`, `formal_charge`, `flex_depth`, `electronegativity`, `valence`, `covalent_radius` |
-| `edges_aa_{left,right}` | atom–atom covalent edges, coloured by **bond order** (white=single, blue=double, orange=aromatic, purple=other) |
-| `edges_aa_rot_{left,right}` | the **sidechain-rotatable** subset only (magenta) — the bond-rotatability signal |
+| `edges_aa_bondorder_{left,right}` | covalent edges coloured by the 4-way **bond order**: white = single, cyan = double, orange = aromatic, purple = other (triple bonds land in "other") |
+| `edges_aa_rotatable_{left,right}` | **the same edges**, coloured by the 0/1 **sidechain-rotatable** flag: blue = 0, red = 1 — the bond-rotatability signal |
 | `edges_vv_{dist,cos}_{left,right}` | vertex–vertex mesh edges, coloured by their **edge features** |
 | `edges_va_{dist,cos}_{left,right}` | vertex→atom edges, likewise |
 | `contacts` | the training positives linking left to right |
@@ -68,11 +68,14 @@ features are:
 | `vv` vertex–vertex (mesh) | 9 | edge length → RBF (8 Gaussians, centres 0–4 Å) + cos(normal_i, normal_j) |
 | `va` vertex→atom | 9 | distance → RBF (8 Gaussians, 0–5 Å) + cos(normal_v, unit(atom − vertex)) |
 
-Every one of them is an **SE(3)-invariant scalar** — a distance or a cosine. No coordinate ever
+Note that `sidechain_rotatable` is a value carried by *every* covalent edge, not a subset of them,
+so `edges_aa_rotatable_*` draws all bonds and colours the 0s and 1s differently.
+
+The geometric edge features are all **SE(3)-invariant scalars** — a distance or a cosine. No coordinate ever
 enters the network, which is what makes the encoder provably rotation-invariant. The atom→vertex
 direction reuses the same `va` feature with a *separate* MLP, so direction is distinguished by the
 function rather than by the feature. The `sidechain_rotatable` flag is the bond-rotatability signal
-the project is built around — see it on its own with `masif_show edges_aa_rot`.
+the project is built around — `masif_show edges_aa_rotatable`.
 
 Objects are created **feature-major**, so `<feature>_left` and `<feature>_right` sit next to each
 other in the panel:
@@ -105,7 +108,7 @@ cloud, but the number it shows lives on a vertex node.
 
 The background is left at PyMOL's default (black). Scalar channels use **blue → white → red**. The scale is symmetric about 0 for signed channels, and
 the **same range is applied to left and right**, so the two partners are directly comparable rather
-than each auto-scaled to itself. Binary features read grey (0) / red (1).
+than each auto-scaled to itself. Binary features read blue (0) / red (1).
 
 **All 52 objects are built on load**, including the dense `edges_vv_*` / `edges_va_*` layers
 (~140k lines, ~0.2 s). Only `structure`, `vert_si_left`, `vert_si_right` and `contacts` start
@@ -121,7 +124,10 @@ responsive. `masif_pair <file>, dense=0` skips the dense edge layers if you ever
 * `atom_is_surface` — red atoms are the readout nodes the encoder actually emits embeddings for.
 * `edges_va_dist` — should link each vertex to the atoms directly beneath it (blue = near), never
   across the molecule; the 5 Å ball cut-off is visible as the reddest edges.
-* `edges_aa` — bond order by colour; `edges_aa_rot` isolates the rotatable bonds.
+* `edges_aa_bondorder` — a protein runs ~75% single / ~15% double / ~5–12% aromatic; the aromatics
+  should sit only on Phe/Tyr/Trp/His rings.
+* `edges_aa_rotatable` — red bonds are the rotatable ones (~21–25% of protein bonds); they should
+  avoid the backbone and the interiors of rings.
 
 ## The five pairs
 

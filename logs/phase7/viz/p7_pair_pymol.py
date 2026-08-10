@@ -28,8 +28,8 @@ Objects
     atom_<feature>_{left,right}                   every one of the 26 atom-node features
     atom_element_{left,right}                     element identity (categorical)
     atom_hybridization_{left,right}               sp / sp2 / sp3 (categorical)
-    edges_aa_{left,right}                         atom-atom covalent edges, coloured by bond order
-    edges_aa_rot_{left,right}                     the rotatable-bond subset only
+    edges_aa_bondorder_{left,right}               covalent edges, coloured by the 4-way bond order
+    edges_aa_rotatable_{left,right}               the same edges, coloured by the 0/1 rotatable flag
     edges_vv_{dist,cos}_{left,right}              mesh edges, coloured by their edge FEATURES
     edges_va_{dist,cos}_{left,right}              vertex->atom edges, likewise
     contacts                                      the training positives linking left to right
@@ -197,20 +197,29 @@ def _build_all(z, meta, dense):
             made.append("atom_%s_%s" % (names[k], tag))
 
     # ---- edges ----
+    # aa carries 5 numbers: a 4-way bond-order one-hot and a rotatable flag. One object each, named
+    # after the feature like every other edge layer.
     for tag in ("left", "right"):
         aa = z["%s_aa_edge" % tag]
         if len(aa):
             order = z["%s_aa_order" % tag].argmax(1)
             cmd.load_cgo(_lines(A[tag][aa[:, 0]], A[tag][aa[:, 1]],
-                                [_BOND_RGB[o] for o in order], 2.5), "edges_aa_%s" % tag)
-            made.append("edges_aa_%s" % tag)
+                                [_BOND_RGB[o] for o in order], 2.5),
+                         "edges_aa_bondorder_%s" % tag)
+            made.append("edges_aa_bondorder_%s" % tag)
+    # `sidechain_rotatable` is a 0/1 flag on EVERY covalent edge, not a subset of them, so draw all
+    # edges and colour by the value. Showing only the 1s would misread the feature as a filter.
     for tag in ("left", "right"):
         aa = z["%s_aa_edge" % tag]
-        rot = z["%s_aa_rot" % tag] > 0.5 if len(aa) else np.zeros(0, bool)
-        if len(aa) and rot.any():
-            cmd.load_cgo(_lines(A[tag][aa[rot, 0]], A[tag][aa[rot, 1]],
-                                [(1.0, 0.2, 0.8)] * int(rot.sum()), 3.0), "edges_aa_rot_%s" % tag)
-            made.append("edges_aa_rot_%s" % tag)
+        if not len(aa):
+            continue
+        r = np.asarray(z["%s_aa_rot" % tag], float)
+        t = _scale(r, 0.0, 1.0)                      # 0 -> blue, 1 -> red
+        cmd.load_cgo(_lines(A[tag][aa[:, 0]], A[tag][aa[:, 1]], [_ramp(x) for x in t], 2.5),
+                     "edges_aa_rotatable_%s" % tag)
+        made.append("edges_aa_rotatable_%s" % tag)
+        ranges["edges_aa_rotatable"] = (0.0, 1.0)
+
     if dense:
         made += _build_edges(z)
     _S["ranges"] = ranges
@@ -318,7 +327,7 @@ def masif_pair(npz_path, dense=1):
     print("[masif] shared left/right colour ranges: %s"
           % ", ".join("%s[%.2f,%.2f]" % (k.split("_", 1)[1], v[0], v[1])
                       for k, v in rr.items() if k.startswith("vert_")))
-    print("[masif] masif_show <prefix>   e.g. vert_charge | vert_hphob | atom_hbond_donor | edges_aa")
+    print("[masif] masif_show <prefix>   e.g. vert_charge | atom_hbond_donor | edges_aa_rotatable")
     print("[masif] masif_edges           rebuild the vv/va layers if loaded with dense=0")
     ef = meta.get("edge_features", {})
     for k in ("aa", "vv", "va"):
