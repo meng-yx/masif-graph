@@ -31,6 +31,11 @@ yet written. Design still runs ahead of code — read the docs before building.
 - `docs/03-phase2-design.md` — **current work:** holo→apo robustness via a heterogeneous atom
   graph (connectivity + bond rotatability); the re-targeted gate and the fixed-backbone repack.
 - `README.md` — human-facing overview and repo layout.
+- `docs/22-pymol-viz-guideline.md` — **standing requirement** for any PyMOL visualisation of the
+  network input: one `.npz` per training pair, both partners in full, an object for every feature
+  the GNN consumes, `{carrier}_{feature}_{left/right}` naming, training positives drawn. Follow it
+  whenever the user asks to visualise the model input, and update its §4 table when the
+  architecture changes.
 
 When a task touches modelling choices, check the docs first; if you diverge from a
 D-decision, say so explicitly. Phase 2 locks D6(freeze)/D3-A/D2/D4 provisionally (see
