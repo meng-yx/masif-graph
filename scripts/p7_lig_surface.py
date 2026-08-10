@@ -334,39 +334,55 @@ def build(args):
     return rep
 
 
-def apbs_from_selfpqr(mol, vertices, base):
-    """D7-5 fallback: write the PQR ourselves (Gasteiger + D7-2 radii) and drive APBS directly.
-
-    Used when pdb2pqr refuses a ligand-only input. Same solver and same kT/e units as the protein
-    side, which a Coulomb approximation would not give."""
-    from default_config.global_vars import apbs_bin, multivalue_bin
-
+def write_pqr_rows(mol, fh, start_serial=1, resnum=1):
+    """Append ligand atoms to a PQR: Gasteiger charge + the D7-2 radius, APBS's native input."""
     AllChem.ComputeGasteigerCharges(mol)
     conf = mol.GetConformer()
-    pqr = base + ".pqr"
+    n = 0
+    for i, atom in enumerate(mol.GetAtoms()):
+        p = conf.GetAtomPosition(i)
+        q = atom.GetDoubleProp("_GasteigerCharge")
+        if not np.isfinite(q):
+            q = 0.0
+        r = RADII.get(atom.GetSymbol().upper(), DEFAULT_RADIUS)
+        nm = atom.GetPDBResidueInfo().GetName().strip()
+        # whitespace-delimited, the same dialect pdb2pqr --whitespace emits, so one parser reads
+        # both halves of a merged PQR and long coordinates can never run two fields together.
+        fh.write("ATOM %d %s %s %s %d %.3f %.3f %.3f %.4f %.4f\n"
+                 % (start_serial + i, nm[:4], LIG_RESNAME, LIG_CHAIN, resnum,
+                    p.x, p.y, p.z, q, r))
+        n += 1
+    return n
+
+
+def run_apbs(pqr_path, vertices, base):
+    """Solve PB on an arbitrary PQR and sample the potential at `vertices` (kT/e).
+
+    Shared by the ligand-alone path and the composite path so both sit on the same physical scale;
+    the grid is sized off the molecule the way psize.py would."""
+    from default_config.global_vars import apbs_bin, multivalue_bin
+
+    # PQR has two dialects: fixed-column, and the whitespace form pdb2pqr --whitespace writes.
+    # The trailing five fields are x y z charge radius in both, so index from the end.
     xyz = []
-    with open(pqr, "w") as fh:
-        for i, atom in enumerate(mol.GetAtoms()):
-            p = conf.GetAtomPosition(i)
-            q = atom.GetDoubleProp("_GasteigerCharge")
-            if not np.isfinite(q):
-                q = 0.0
-            r = RADII.get(atom.GetSymbol().upper(), DEFAULT_RADIUS)
-            nm = atom.GetPDBResidueInfo().GetName().strip()
-            fh.write("ATOM  %5d %-4s %3s %s%4d    %8.3f%8.3f%8.3f %7.4f %7.4f\n"
-                     % (i + 1, nm[:4], LIG_RESNAME, LIG_CHAIN, 1, p.x, p.y, p.z, q, r))
-            xyz.append([p.x, p.y, p.z])
+    with open(pqr_path) as fh:
+        for line in fh:
+            if line.startswith(("ATOM", "HETATM")):
+                f = line.split()
+                xyz.append([float(f[-5]), float(f[-4]), float(f[-3])])
     xyz = np.array(xyz)
-    # coarse/fine grid sized off the molecule, the same way psize.py would
+    if len(xyz) == 0:
+        raise RuntimeError("empty PQR: %s" % pqr_path)
     lo, hi = xyz.min(0), xyz.max(0)
     span = hi - lo
-    cglen = span + 20.0
-    fglen = span + 10.0
+    cglen = span + 30.0
+    fglen = span + 15.0
     cent = (hi + lo) / 2.0
-    dime = np.maximum(33, (np.ceil(fglen / 0.5) // 32 * 32 + 1)).astype(int)
+    dime = np.clip((np.ceil(fglen / 0.5) // 32 * 32 + 1).astype(int), 33, 161)
     inp = base + ".in"
+    directory = os.path.dirname(base) or "."
     with open(inp, "w") as fh:
-        fh.write("read\n    mol pqr %s\nend\nelec\n    mg-auto\n" % os.path.basename(pqr))
+        fh.write("read\n    mol pqr %s\nend\nelec\n    mg-auto\n" % os.path.basename(pqr_path))
         fh.write("    dime %d %d %d\n" % tuple(dime))
         fh.write("    cglen %.3f %.3f %.3f\n" % tuple(cglen))
         fh.write("    fglen %.3f %.3f %.3f\n" % tuple(fglen))
@@ -376,7 +392,6 @@ def apbs_from_selfpqr(mol, vertices, base):
                  "    srfm smol\n    chgm spl2\n    sdens 10.00\n    srad 1.40\n    swin 0.30\n"
                  "    temp 298.15\n    calcenergy no\n    calcforce no\n"
                  "    write pot dx %s\nend\nquit\n" % os.path.basename(base))
-    directory = os.path.dirname(base) or "."
     p = Popen([apbs_bin, os.path.basename(inp)], stdout=PIPE, stderr=PIPE, cwd=directory)
     _o, e = p.communicate()
     if not os.path.exists(base + ".dx"):
@@ -390,8 +405,9 @@ def apbs_from_selfpqr(mol, vertices, base):
     charges = np.zeros(len(vertices))
     with open(base + "_out.csv") as fh:
         for ix, line in enumerate(fh):
-            charges[ix] = float(line.split(",")[3])
-    for ext in (".pqr", ".in", ".dx", ".csv", "_out.csv"):
+            if ix < len(charges):
+                charges[ix] = float(line.split(",")[3])
+    for ext in (".in", ".dx", ".csv", "_out.csv"):
         try:
             os.remove(base + ext)
         except OSError:
@@ -399,34 +415,22 @@ def apbs_from_selfpqr(mol, vertices, base):
     return charges
 
 
-def batch(args):
-    """Loop many PDBbind ids in ONE container invocation (singularity startup dominates otherwise)."""
-    ids = [l.strip() for l in open(args.ids_file) if l.strip() and not l.startswith("#")]
-    nok = 0
-    for pid in ids:
-        prefix = os.path.join(args.out_dir, "lig" + pid)
-        if os.path.exists(prefix + "_feat.npy") and not args.force:
-            print(json.dumps({"id": pid, "ok": True, "skipped": "cached"}))
-            sys.stdout.flush()
-            nok += 1
-            continue
-        sub = argparse.Namespace(
-            sdf=os.path.join(args.pdbbind_dir, pid, pid + "_ligand.sdf"),
-            mol2=os.path.join(args.pdbbind_dir, pid, pid + "_ligand.mol2"),
-            out_prefix=prefix, id=pid, min_vertices=args.min_vertices,
-            apbs_mode=args.apbs_mode)
+def apbs_from_selfpqr(mol, vertices, base):
+    """D7-5: ligand electrostatics with a self-written PQR, used for the WHOLE ligand corpus.
+
+    `pdb2pqr --ligand` succeeded on only 15/50 sampled ligands even after the amide-bond fix, so
+    routing part of the corpus through it would split the charge channel across two scales. Where
+    both ran they correlate at 0.927 (S1), so uniformity costs little."""
+    pqr = base + ".pqr"
+    with open(pqr, "w") as fh:
+        write_pqr_rows(mol, fh)
+    try:
+        return run_apbs(pqr, vertices, base)
+    finally:
         try:
-            rep = build(sub)
-        except Exception as exc:                                    # noqa: BLE001
-            rep = {"id": pid, "ok": False, "err": "%s: %s" % (type(exc).__name__, exc)}
-            if os.environ.get("P7_TRACE"):
-                import traceback
-                traceback.print_exc()
-        nok += bool(rep.get("ok"))
-        print(json.dumps(rep))
-        sys.stdout.flush()
-    print(json.dumps({"BATCH_DONE": True, "ok": nok, "n": len(ids)}))
-    return 0
+            os.remove(pqr)
+        except OSError:
+            pass
 
 
 def main():

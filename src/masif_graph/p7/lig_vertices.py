@@ -84,7 +84,6 @@ def attach(npz_path, surf_prefix, out_path, va_radius=VA_RADIUS, va_kmax=VA_KMAX
 def main():
     import argparse
     import json
-    import shutil
 
     ap = argparse.ArgumentParser()
     ap.add_argument("--ids", required=True, help="one PDBbind id per line (no 'pl' prefix)")
@@ -112,10 +111,12 @@ def main():
             except Exception as exc:                                # noqa: BLE001
                 rep.update(ok=False, err="%s: %s" % (type(exc).__name__, exc))
         if rep.get("ok") and args.copy_protein:
+            # symlink, not copy: the protein side and the contacts are bit-identical to Phase 6C by
+            # design (that is what makes this a controlled A/B), so duplicating ~11 GB buys nothing.
             for suf in ("__holo__p1.npz", "__contacts.npz"):
                 s, d = os.path.join(args.src, cid + suf), os.path.join(args.dst, cid + suf)
-                if os.path.exists(s) and not os.path.exists(d):
-                    shutil.copyfile(s, d)
+                if os.path.exists(s) and not os.path.lexists(d):
+                    os.symlink(os.path.abspath(s), d)
         nok += bool(rep.get("ok"))
         print(json.dumps(rep), flush=True)
     print(json.dumps({"DONE": True, "ok": nok, "n": len(ids)}))
