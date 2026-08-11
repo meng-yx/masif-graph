@@ -18,10 +18,29 @@ success criterion.** Consequence to keep in mind: the current holo-only validati
 by itself, demonstrate this benefit — evaluation must include apo-like structures (Phase 2 uses
 fixed-backbone sidechain repack as the controlled proxy; see `docs/03-phase2-design.md`).
 
-**Status: Phase 1 complete (CONDITIONAL GO); Phase 2 in design.** Phase-1 code exists under
-`src/masif_graph/{io,surface,pairs,metrics,align,experiments}` (+ `scripts/`, `logs/m1`,
-`logs/m2`, `docs/figures/`); Phase-2 modules (`graph/ perturb/ train/ score/`) are planned, not
-yet written. Design still runs ahead of code — read the docs before building.
+### North star, sharpened (2026-08-11, with the user) — read this, not just the paragraph above
+Train a **generalizable model that evaluates biomolecular interactions from apo / predicted
+(AF2/AF3) structures**, without requiring the induced-fit holo conformation. A partner may be a
+protein, a protein complex, a small molecule, a protein–small-molecule complex, later a nucleic
+acid. The model should learn **per atom, conditioned on local environment, how much shape and
+chemical mismatch is tolerable** — an implied latent conformational landscape reachable from the
+apo structure. Deployment mode is **retrieval/screening**; the training signal is **evaluation**:
+`P(A and B form a biologically meaningful assembly)`. **Not** Kd/Ki prediction. Molecular glue is
+the LAST deployment target (too little data, and Phase 7 showed it is a third relation, not
+PPI ∘ P–L). Full contract: `docs/23-phase8-design.md`.
+
+**Status: Phases 1–7 complete; Phase 8 designed, not started.**
+- Phase 5 **met the robustness gate** — the from-scratch invariant encoder beats frozen MaSIF on
+  AF3-apo retrieval and is conformation-robust. Phase 7 extended that to the ligand axis.
+- The **atom/chem-graph thesis of §2 in `docs/00` is NOT earned** — five independent nulls
+  (Phases 2→7). Robustness came from invariant features + the contrastive recipe. Do not invest
+  further in chemistry-graph elaboration.
+- **Two representation upgrades failed the capacity gate** (Phase 6C unified 26-D atoms; Phase 7
+  full ligand surfaces): train-set protein–ligand retrieval stayed ~0.11. The bottleneck is the
+  **objective and the label**, which is what Phase 8 changes.
+- Phase 7 also showed **capacity competition** (ligand surfaces cost PPI −0.169 and hurt PPI
+  *training*), and that **one seed lies** (the Phase-6C −0.041 gap vanished at 2 seeds).
+Design still runs ahead of code — read the docs before building.
 
 ## Read before writing code
 - `docs/00-context-and-goals.md` — north star: hypothesis, key design decisions **D1–D10**,
@@ -30,6 +49,8 @@ yet written. Design still runs ahead of code — read the docs before building.
   and its CONDITIONAL GO (mean pooling; ~0.03–0.05 holo pooling cost).
 - `docs/03-phase2-design.md` — **current work:** holo→apo robustness via a heterogeneous atom
   graph (connectivity + bond rotatability); the re-targeted gate and the fixed-backbone repack.
+- `docs/21-phase7-results.md` + `docs/23-phase8-design.md` — the latest results and the **current
+  design contract**. Start here for anything about what to build next.
 - `README.md` — human-facing overview and repo layout.
 - `docs/22-pymol-viz-guideline.md` — **standing requirement** for any PyMOL visualisation of the
   network input: one `.npz` per training pair, both partners in full, an object for every feature
@@ -41,13 +62,20 @@ When a task touches modelling choices, check the docs first; if you diverge from
 D-decision, say so explicitly. Phase 2 locks D6(freeze)/D3-A/D2/D4 provisionally (see
 `03-phase2-design.md §2`); D1-B is the escalation if the graph can't close the gap.
 
-## The Phase-2 gate (what the current work is deciding)
-Does a graph encoding **atom connectivity + bond rotatability**, fused with the frozen surface
-descriptor, make the representation **robust to sidechain conformation** — i.e. degrade less
-under an apo-like fixed-backbone sidechain repack than surface-only — **without harming holo
-performance**? Holo AUC is a do-no-harm floor, *not* the objective. Do **not** build Phase 3+
-(learned pose scorer, aligner hardening, ligands, true apo/AF2 training) until this gate is met.
-The graph showing ~zero gain on **holo** is expected — the benefit lives in the apo-like regime.
+## The Phase-8 gate (what the current work is deciding)
+A **three-stage funnel** (`docs/23-phase8-design.md`, reconciling `docs/11`):
+Stage 1 atom-level encoder (EXISTS) → Stage 2 pose prediction → Stage 3 pose-level
+`P(biologically meaningful)`. Trained on an ordinal **0/1/2** label: biological assembly = 2,
+crystal contact / crystallisation additive = **1** (a real, complementary, non-biological contact —
+the exact false-positive mode we must kill), random = 0.
+
+**Two cheap diagnostics gate the whole plan and come first:** (A1) is the encoder modelling
+flexibility or merely **ignoring sidechains**? (A2) do **cryptic pockets** close in apo models,
+bounding what any model can do from apo input? Either can invalidate the design.
+
+Hard controls that are not optional: a **BSA-only baseline** Stage 3 must beat (interface size is
+the obvious shortcut), a **scheduled structure-only ablation** of the conservation features, and
+**≥2 seeds for every claim**.
 
 ## Commands
 ```bash
