@@ -39,6 +39,38 @@ both below the ~298 chance line). It is a third relation and will need its own t
 | Phase 7 **capacity competition**: adding ligand surfaces cost PPI −0.169 *and* hurt PPI training | Multi-molecule-type in one encoder needs an architecture/capacity answer. Do not add features to the shared encoder without one. |
 | One seed lies (the Phase-6C −0.041 gap vanished at 2 seeds) | ≥2 seeds per condition remains mandatory. |
 
+## 1.5 Training-corpus composition — CURRENT STATE AND THE GAP
+
+**Every model trained in Phases 1–7 saw holo (crystal) structures only.** All apo data has lived on
+the evaluation side. This was never stated in a results summary, and Phase 7's D7-7 deferred
+apo-augmented training in a design doc without surfacing the decision. Recorded here so it is
+contract, not inference.
+
+| corpus | holo | AI-predicted apo | where apo was used |
+|---|---|---|---|
+| PPI training (`npz_ppi`) | 4,767 | **0** | — |
+| PDBbind P–L (`npz_pl`) | 5,239 | 298 | held-out eval only |
+| Phase-5 PPI eval (`npz_eval`) | 301 | 284 | eval only |
+
+Consequence: **the holo→apo robustness reported in Phases 5 and 7 is zero-shot generalisation**, not
+learned from apo examples. That is a stronger result than it sounds, but it also means the per-atom
+tolerance of D8-9 has never had a training signal — you cannot learn "how much can this atom move"
+from a corpus that shows every entity exactly once, in its bound state.
+
+**D8-12 — Corpus composition (target).** Every holo chain is paired with AI-predicted apo
+conformer(s). Ratio and source are **UNDECIDED pending Stage A0** (§6) and the user's decision:
+* **Option A (1:1)** — AFDB where an acceptable sequence match exists, local prediction otherwise.
+  AFDB has one model per sequence, so the ratio is capped at 1:1. Its advantage is that an AFDB model
+  is **distribution-matched to deployment** if the screening database is AFDB/TED.
+* **Option B (1:N, N≈5)** — locally predict apo conformers for every holo chain. Only this can supply
+  the **conformational spread** that D8-9's σ supervision needs; AFDB alone cannot.
+These are complementary, not exclusive: AFDB for deployment realism, local ensembles for the σ signal.
+
+**Cost note that changes the arithmetic:** the MSA dominates (~3.3 core-h/chain) and is paid once per
+chain regardless of how many conformers are sampled, while AF3's `num_diffusion_samples` reuses the
+trunk. **Five conformers therefore cost ~1.5–2× one conformer, not 5×.** Phase 7's use of
+`NSAMP=1` was a mistake on those economics.
+
 ## 2. Architecture — a three-stage funnel
 
 ```
@@ -208,6 +240,14 @@ fine-tuning beats frozen Stage 1" is an explicit gate, not an assumption.
 
 **D8-11 — Seeds.** ≥2 per condition for every claim, per Phase-7 (D7-6).
 
+**D8-13 — The Phase-7 ligand surface is carried as an A/B variable inside Phase 8, not re-tested as
+a separate phase.** Phase 7's primary verdict (a ligand surface is not a capacity fix) is **not**
+confounded by holo-only training: that gate was *train-set* retrieval measured on holo data the model
+had been trained on, so apo augmentation cannot explain a failure to fit it. What remains genuinely
+open is second-order — whether the surface pays off *once tolerance is being learned*. Since Phase 8
+rebuilds the corpus with apo conformers regardless, that question costs one extra training arm here
+instead of a whole re-run of Phase 7.
+
 ## 5. Metrics — the funnel is evaluated stage-wise, never as one number
 
 | stage | metric | gate |
@@ -223,7 +263,34 @@ and per-item spread are reported throughout, per `ml-research-guardrails`.
 
 ## 6. Stages and their gates
 
-**Stage A — diagnostics (cheap, and either can invalidate the plan). Do these first.**
+**Stage A0 — BENCHMARK THE AI-PREDICTION METHODS. This is the first thing built, and the
+phase PAUSES at its end.**
+
+Choose how apo conformers are generated before generating ~14,700 chains' worth of them. Candidates:
+**AF3**, **Chai-1** (installed; supports an MSA-free mode), **Boltz-2** (can reuse AF3 MSAs).
+**ESMFold is disqualified for the ensemble role** — it is deterministic, one structure per sequence,
+so it cannot supply conformational spread at any price; it may still be benchmarked as a cheap 1:1
+option under Option A.
+
+Run all candidates on ~30 chains for which we already hold both holo structures and AF3 models, and
+report:
+1. **wall time and CHF per chain, MSA and inference separately** (MSA dominates and is amortised
+   across conformers);
+2. **accuracy vs holo** — TM-score, interface RMSD;
+3. **inter-sample conformational spread, and whether it tracks real flexibility.** This is the metric
+   most easily forgotten and the one we are actually buying: five near-identical models are useless
+   for σ however accurate, and five wildly divergent ones are equally useless. Calibrated spread is
+   the deliverable. Compare against B-factors/pLDDT and, where the PDB holds multiple entries for the
+   same protein, against genuine experimental conformational variation.
+4. **AFDB coverage** — what fraction of our holo chains have an acceptable AFDB sequence match, and
+   what the residual (mutants, designed and artificial constructs) looks like.
+
+> **PAUSE HERE.** Stage A0 produces a recommendation, not a decision. The user chooses the method and
+> the holo:apo ratio (D8-12) before any of Stages A1–E is implemented. Estimated Stage-A0 cost
+> ~CHF 5; the full generation run that follows is ~CHF 150–560 depending on the choice, which is why
+> it is not made unilaterally.
+
+**Stage A — diagnostics (cheap, and either can invalidate the plan). Do these after A0.**
 * **A1 — sidechain sensitivity.** Is the current encoder modelling flexibility, or *ignoring
   sidechains*? Use FASPR repacks: how much do embeddings and PPI retrieval change under sidechain
   scrambling vs the true apo? Correlate per-atom embedding sensitivity with B-factor/pLDDT.

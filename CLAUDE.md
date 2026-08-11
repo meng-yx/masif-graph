@@ -62,6 +62,14 @@ When a task touches modelling choices, check the docs first; if you diverge from
 D-decision, say so explicitly. Phase 2 locks D6(freeze)/D3-A/D2/D4 provisionally (see
 `03-phase2-design.md §2`); D1-B is the escalation if the graph can't close the gap.
 
+## Training-corpus provenance (state it in every results summary)
+**Phases 1–7 trained on HOLO structures only.** Apo has only ever been on the evaluation side:
+PPI training 4,767 holo / **0 apo**; PDBbind P–L 5,239 holo / 298 apo (held-out eval only);
+Phase-5 eval 301 holo / 284 apo. So the reported holo→apo robustness is **zero-shot**, not learned.
+Phase 8 changes this (D8-12) — the holo:apo ratio and the prediction method are **undecided pending
+the Stage-A0 benchmark and a user decision**. Never report a training result without saying which
+states were in the training set.
+
 ## The Phase-8 gate (what the current work is deciding)
 A **three-stage funnel** (`docs/23-phase8-design.md`, reconciling `docs/11`):
 Stage 1 atom-level encoder (EXISTS) → Stage 2 pose prediction → Stage 3 pose-level
