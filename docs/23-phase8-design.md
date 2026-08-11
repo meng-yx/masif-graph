@@ -17,8 +17,9 @@ structures, without requiring knowledge of the induced-fit holo conformation.**
   are flexible and should tolerate mismatch.
 
 **Deployment mode is retrieval/screening** (rank candidate partners for a target). **The training
-signal is evaluation**: `P(A and B form a biologically meaningful assembly)`. Evaluation subsumes
-retrieval — rank by P — so Phases 4–7 are not discarded, they gain a better-defined output.
+signal is evaluation**: `P(A and B form a biologically meaningful assembly)`, factorised over two
+binary labels (§3). Evaluation subsumes retrieval — rank by P — so Phases 4–7 are not discarded,
+they gain a better-defined output.
 
 **Explicitly not the objective:** predicting Kd/Ki. Affinity regression is welcome if it helps, but
 1 µM vs 1 nM is not what we are trying to predict.
@@ -62,7 +63,7 @@ express that, which is why per-atom retrieval plateaus.
 | | Stage 1 | Stage 2 | Stage 3 |
 |---|---|---|---|
 | pose | none (pose-free) | produces it | consumes it |
-| bio-vs-crystal distinction | **not visible** | not visible | **this is its job** |
+| `biological` label | **not visible** | not visible | **this is its job** (trained on `comp=1` only) |
 | conservation | no (D8-5) | no | yes, as interface aggregates |
 | molecule type | agnostic (shared 26-D atom space) | agnostic | type-aware head allowed |
 
@@ -73,24 +74,62 @@ Correspondingly, a lattice contact is a perfectly valid **atom-level** positive:
 complementarity is real physics. This resolves the labelling question cleanly and, as a bonus,
 quarantines the buried-surface-area confound (§5) to Stage 3 alone.
 
-## 3. Labels — an ordinal 3-class scheme, parallel across molecule types
+## 3. Labels — TWO BINARY LABELS, not an ordinal
 
-| class | protein–protein | protein–ligand |
+Superseded design (2026-08-11, user): an earlier draft used a single ordinal `{0,1,2}`. That was a
+design error, and the tell is that **no single stage could own it** — it smeared a Stages-1/2
+property and a Stage-3 property onto one axis, contradicting the factorisation of §2.1.
+
+```
+complementary_contact ∈ {0,1}    "do these surfaces fit?"          -> Stages 1-2
+biological_contact    ∈ {0,1}    "given that they fit, is it real?" -> Stage 3
+```
+
+with the hard implication **`biological ⇒ complementary`**. Three states are observable and the
+fourth is impossible by construction:
+
+| state | protein–protein | protein–ligand |
 |---|---|---|
-| **2** biologically meaningful | interface present in the biological assembly | functional ligand (substrate / cofactor / inhibitor / drug) |
-| **1** compatible but not biological | crystal-lattice contact | **crystallisation additive** (glycerol, PEG, sulfate, MPD, DMSO, acetate, Tris…) or a ligand at a non-functional site |
-| **0** incompatible | non-interacting pair | ligand against a random surface patch |
+| `comp=1, bio=1` | interface present in the biological assembly | functional ligand (substrate / cofactor / inhibitor / drug) |
+| `comp=1, bio=0` | crystal-lattice contact | **crystallisation additive** (glycerol, PEG, sulfate, MPD, DMSO, acetate, Tris…) or a ligand at a non-functional site |
+| `comp=0, bio=0` | non-interacting pair | ligand against a random surface patch |
+| `comp=0, bio=1` | — impossible — | — impossible — |
 
-Class 1 is the point of the scheme: a **real, measurable, genuinely complementary contact that is not
-biology** — precisely the false-positive mode the project exists to kill.
+`comp=1, bio=0` is the point of the scheme: a **real, measurable, genuinely complementary contact
+that is not biology** — precisely the false-positive mode the project exists to kill.
+
+### 3.1 Why two binaries beat the ordinal
+
+On observed data the encodings are isomorphic, so this is not about expressiveness:
+
+1. **It gives the funnel exact probabilistic semantics.** Because `bio ⇒ comp`,
+   **`P(biological) = P(complementary) · P(biological | complementary)`** — Stages 1–2 estimate the
+   first factor, Stage 3 the second, and their **product is the deployment score**. The funnel stops
+   being an engineering pipeline and becomes a factorisation of the quantity we actually want.
+2. **It decouples the training data, which is the practical win.** *Every* crystal contact, additive
+   and biological interface is a **complementarity** positive, so that head is not bottlenecked by
+   assembly-annotation coverage; only the `bio` head needs curated labels. Under the ordinal, the
+   scarce label would have throttled everything.
+3. **No false metric.** An ordinal loss asserts that `0→1` and `1→2` lie on one axis at comparable
+   distance. We have no reason to believe that. Two Bernoullis assert nothing.
+4. **Interpretable failure at deployment.** "Doesn't fit" and "fits but isn't biology" are different
+   answers, and only the second deserves a human's attention.
+
+### 3.2 `complementary_contact` is defined at the INTERFACE/POSE level, not the atom level
+
+`docs/11`'s governing argument is that *any two proteins have some complementary atom pairs by
+chance*, so `comp=0` would be a **noisy, near-meaningless label at the atom level**. At the pose
+level it is well-posed: *does a sufficiently large, geometrically coherent, clash-free complementary
+interface exist?* — which is exactly what Stage 2 produces and can be scored on. Stage 1 keeps its
+existing atom-level contrastive objective and is never asked to emit this binary.
 
 **Label sources** (to verify on `/work` before mining):
-* PPI class 2/1 — the PDB's own `_pdbx_struct_assembly.details`. Prefer
-  `author_and_software_defined_assembly` as high-confidence class 2; software-only as a lower tier,
-  reported separately. PISA is a *predictor*, not ground truth, and is not treated as such.
-* P–L class 2/1 — **BioLiP** (curated biologically-relevant ligands, crystallisation additives
-  filtered) gives class 2; the complement within the same structures gives class 1.
-* Class 0 — two tiers, reported separately: **(0a) random pairs** (easy, abundant) and **(0b)
+* PPI `bio` — the PDB's own `_pdbx_struct_assembly.details`. Prefer
+  `author_and_software_defined_assembly` as the high-confidence positive; software-only as a lower
+  tier, reported separately. PISA is a *predictor*, not ground truth, and is not treated as such.
+* P–L `bio` — **BioLiP** (curated biologically-relevant ligands, crystallisation additives filtered)
+  gives `bio=1`; the complement within the same structures gives `comp=1, bio=0`.
+* `comp=0` — two tiers, reported separately: **(a) random pairs** (easy, abundant) and **(b)
   same-organism, co-expressed, non-interacting pairs** (hard, closer to the screening distribution).
 
 **Crystal contacts, staged:** start with **asymmetric-unit chain pairs not in the same biological
@@ -99,14 +138,24 @@ symmetry mates (gemmi) once the pipeline and labels are validated.
 
 ## 4. Design decisions
 
-**D8-1 — Objective.** `P(biologically meaningful interaction)`, ordinal over {0,1,2}. Not affinity.
-Retrieval is the deployment mode, obtained by ranking on P.
+**D8-1 — Objective.** Two binary labels, `complementary_contact` and `biological_contact`, with
+`biological ⇒ complementary` (§3). The deployment score is the factorisation
+**`P(biological) = P(complementary) · P(biological | complementary)`**. Not affinity. Retrieval is
+the deployment mode, obtained by ranking on `P(biological)`.
+**The constraint is enforced by construction, not by penalty**: the model predicts `P(comp)` and
+`P(bio | comp)` and multiplies, which makes `P(bio) ≤ P(comp)` structurally true. Predicting the two
+independently and adding a consistency loss would be strictly worse.
 
 **D8-2 — Three-stage funnel** as in §2. Stage 1 is the existing encoder; Stages 2 and 3 are new.
 
-**D8-3 — Class usage by stage.** Stage 1 trains on classes **2 and 1 together** as atom-level
-contact positives (pose-free; local complementarity is real in both). Stage 3 discriminates 2 vs 1
-vs 0. Under no circumstances does Stage 1 receive the bio/crystal label.
+**D8-3 — Label usage by stage.** Stage 1 trains on **all `comp=1` contacts together** — biological
+and crystal alike — as atom-level contact positives (pose-free; the local complementarity is real
+physics in both). **Under no circumstances does Stage 1 or Stage 2 receive the `biological` label.**
+**Stage 3 trains ONLY on `comp=1` examples**, i.e. {crystal contacts, biological interfaces}: that is
+the correct conditional likelihood `P(bio | comp)`. `comp=0` pairs go to Stages 1–2 only — if Stage 3
+saw them it would spend capacity re-learning complementarity and could cheat via easy negatives.
+A useful side effect: the BSA-matching discipline of D8-7 then applies exactly and only where it
+belongs.
 
 **D8-4 — Molecule-type generality via the shared 26-D atom space** (`p6/atoms.py`), unchanged.
 Nucleic acids deferred to Phase 9+.
@@ -134,7 +183,7 @@ Phase 6C; the Phase-7 effect was *larger* on the scaffold-unseen subset, so the 
 
 **D8-7 — BSA-matched sampling and a BSA-only baseline gate.** Biological interfaces are on average
 larger than lattice contacts, so a model can score well by learning **buried surface area and nothing
-else**. Class-1 examples are sampled to match the class-2 BSA distribution; every Stage-3 number is
+else**. `comp=1,bio=0` examples are sampled to match the `bio=1` BSA distribution; every Stage-3 number is
 reported **stratified by BSA**; and **"rank by interface area" is an explicit baseline that Stage 3
 must beat.** This is the shuffled-label control of this phase.
 
@@ -165,7 +214,8 @@ fine-tuning beats frozen Stage 1" is an explicit gate, not an assumption.
 |---|---|---|
 | 1 | **recall**: does the true interface survive the atom-level screen? | must not regress vs the Phase-5/6C encoder |
 | 2 | pose accuracy (DockQ / interface-RMSD vs native), **reported separately for holo and apo inputs** | the holo→apo gap here is the north-star number for this stage |
-| 3 | **2-vs-1 AUC at low FPR**, BSA-stratified | must beat the **BSA-only baseline** (D8-7) |
+| 2 | pose quality → **P(complementary)**: AUC vs `comp=0` pairs (both tiers, reported separately) | must beat a contact-count / size heuristic |
+| 3 | **`bio` vs `crystal` AUC at low FPR, conditioned on `comp=1`**, BSA-stratified | must beat the **BSA-only baseline** (D8-7) |
 | end-to-end | screening enrichment on a held-out benchmark | — |
 
 Reporting only the end-to-end number would hide which stage fails. Chance lines, shuffled controls
@@ -189,15 +239,15 @@ and per-item spread are reported throughout, per `ml-research-guardrails`.
 
 **Stage B — label mining.** ASU-only crystal contacts + biological assemblies (PPI) and
 BioLiP-derived P–L classes; BSA-matched; cluster-clean splits on sequence and scaffold; the
-BSA-only baseline computed. *Gate:* ≥5k class-2 and ≥5k BSA-matched class-1 examples surviving
-clustering, or the scheme is reconsidered.
+BSA-only baseline computed. *Gate:* ≥5k `bio=1` and ≥5k BSA-matched `comp=1,bio=0` interfaces
+surviving clustering, or the scheme is reconsidered.
 
 **Stage C — Stage 3 scorer on rigid poses.** Train the pose-level classifier on Stage-A3 poses, with
-conservation aggregates (D8-5). *Gate:* beats the BSA-only baseline on 2-vs-1 AUC at low FPR,
-**and** beats it in the small-interface BSA stratum.
+conservation aggregates (D8-5), trained on `comp=1` only. *Gate:* beats the BSA-only baseline on
+`bio`-vs-`crystal` AUC at low FPR, **and** beats it in the small-interface BSA stratum.
 
 **Stage D — tolerance mechanism (D8-9) + differentiable Stage 2 (D8-10).** *Gate:* variance-aware
-scoring improves apo pose accuracy and apo 2-vs-1 discrimination over the rigid/point-embedding
+scoring improves apo pose accuracy and apo `bio`-vs-`crystal` discrimination over the rigid/point-embedding
 baseline, at ≥2 seeds.
 
 **Stage E — the conservation ablation (D8-5b)** and a deployment dry-run: a known glue system
