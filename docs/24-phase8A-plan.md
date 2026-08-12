@@ -27,9 +27,9 @@ decision) for D8-12, and `logs/PHASE8A_DONE` touched.
 | SASA / BSA | **biotite `sasa` works**; `freesasa` absent | use biotite; no install |
 | biological assemblies | **`REMARK 350` present** in our cached PDBs (19 lines/entry) | parse from PDB format — **no gemmi needed** for ASU-only |
 | gemmi | absent | not required for Stage A (only for full symmetry expansion, Stage B) |
-| TM-align | absent | `pip install tmtools` (small, pure-pip). Fallback: CA-RMSD + GDT-TS implemented locally |
+| TM-align | **INSTALLED** — `conda_envs/masif-graph/bin/TMalign` (v20220412, compiled from source) | verified: self-alignment TM = 1.00000, cross-pair 0.155/0.483. No `tmtools` needed |
 | AF3 | pipeline exists (`p7_af3_msa/infer.sbatch`), **MSAs already on disk for 298 P–L chains** | re-run inference with `NSAMP=5`; MSA cost already paid |
-| Chai-1 | `/work/upthomae/Meng/Chai_MSA/chai_predict.py` exists; not importable from `masif-graph` | locate its interpreter; else `pip install chai_lab` into a new env |
+| Chai-1 | **conda env `chai` at `/home/ymeng/miniconda3/envs/chai`** — `chai_lab` 0.6.1, torch 2.6.0+cu124 | zero-install. (My earlier "not importable" was a wrong search path: I looked only under `/work/.../conda_envs/`.) |
 | Protenix | **conda env exists** (`conda_envs/protenix`) — open AF3 reproduction | include as a zero-install candidate |
 | Boltz-2 | absent | `pip install boltz` into a fresh env; can consume the AF3 a3m |
 | ESMFold | absent | install only if cheap; **1:1 candidate only** (deterministic → no ensemble) |
@@ -50,20 +50,37 @@ spread metric is measured in both regimes:
 
 Written to `logs/phase8A/a0/testset.txt` with the stratification recorded.
 
-### 2.2 Methods
+### 2.2 Methods, on a shared MSA
+
+**Verified 2026-08-12: every MSA-based method can be run on the *same* MSA, so the benchmark
+isolates inference from search.** Our AF3 `<chain>_data.json` carries the alignments inline as a3m
+strings (`1bq4_A`: `unpairedMsa` 16,705 seqs / 5.9 MB, `pairedMsa` 50,000 seqs / 19.8 MB, plus 4
+templates), and `chai_lab.data.parsing.msas.aligned_pqt.a3m_to_aligned_dataframe` converts a3m →
+chai's `.aligned.pqt`. `run_inference(..., msa_directory=)` then consumes it; the user's earlier
+`Chai_MSA/test/out/msas` run confirms the path works end-to-end.
+
+This matters because MSA search, not inference, is the dominant cost — comparing methods that each
+ran their own search would measure the search tool, not the structure predictor.
+
 | method | MSA | samples | notes |
 |---|---|---|---|
 | AF3 | **already on disk** | 5 | `NSAMP=5`; marginal cost is inference only |
-| Protenix | reuse AF3 MSA | 5 | zero-install |
-| Chai-1 | MSA-free **and** MSA mode | 5 | the MSA-free number is the interesting one |
-| Boltz-2 | reuse AF3 a3m | 5 | |
-| ESMFold | none | 1 | 1:1 (Option A) candidate only |
+| Protenix | shared AF3 MSA | 5 | zero-install (`conda_envs/protenix`) |
+| Chai-1 | shared AF3 MSA **and** MSA-free | 5 | `num_diffn_samples=5` is already its default; the MSA-free number is the interesting one — it prices the 1:5 option without any search cost |
+| Boltz-2 | shared AF3 a3m | 5 | only method still needing an install |
+| ESMFold | none | 1 | 1:1 (Option A) candidate only; deterministic → no ensemble |
+
+Step 0 therefore writes `a0_msa_export.py`: AF3 `_data.json` → `{chain}.a3m` → `{hash}.aligned.pqt`,
+once, shared by all arms. If a method rejects the shared MSA, it runs in its native mode and the
+report says so rather than silently comparing unlike things.
 
 ### 2.3 Metrics — `src/masif_graph/p8/a0_bench.py`
 1. **Cost**: wall-clock and CHF per chain, **MSA and inference reported separately** (MSA dominates
    and amortises across conformers — the economics that made `NSAMP=1` a Phase-7 mistake).
-2. **Accuracy vs holo**: TM-score (`tmtools`), CA-RMSD, and **interface RMSD** over the holo
-   interface residues (reuse `align.global_align.kabsch`).
+2. **Accuracy vs holo**: TM-score (`TMalign`, installed), CA-RMSD, and **interface RMSD** over the
+   holo interface residues (reuse `align.global_align.kabsch`). Report TM-score normalised by the
+   **holo** chain length — with the apo model as chain 2, normalising by the prediction would reward
+   a method that simply predicts fewer residues.
 3. **Calibrated spread** — the metric we are actually buying:
    * pairwise CA-RMSD among the 5 samples (mean, max);
    * **per-residue RMSF across samples**;
@@ -170,7 +187,8 @@ Stage C.
 ## 7. Execution order
 
 ```
-step 0  environment: tmtools; locate Chai; try Boltz-2 / ESMFold      (timeboxed, §9)
+step 0  shared-MSA export (AF3 json → a3m → .aligned.pqt); try Boltz-2 / ESMFold  (timeboxed, §9)
+        [TMalign and Chai are already in place — nothing left to install for them]
         ────────────── then everything below in parallel ──────────────
 A0  AF3(5) / Protenix / Chai / Boltz / ESMFold on 30 chains  + AFDB coverage sweep
 A1  backbone-only ablation ─→ FASPR repack (needs surfacing)
@@ -217,8 +235,9 @@ because `/scratch` has a 30-day cleanup.
 
 | risk | fallback |
 |---|---|
-| Chai / Boltz / ESMFold will not install in the timebox | report "not evaluated"; the benchmark still decides among what did install (AF3 and Protenix need no install) |
-| `tmtools` unavailable | local CA-RMSD + GDT-TS; TM-score omitted and said so |
+| Boltz-2 / ESMFold will not install in the timebox | report "not evaluated"; the benchmark still decides among AF3, Protenix and Chai, none of which need an install |
+| A method rejects the shared AF3 MSA (format/depth limits) | run it in its native MSA mode and **label the row** — a method benchmarked on a different alignment is not comparable on accuracy, only on cost |
+| `pairedMsa` (50k seqs) is too deep for a method's limit | subsample deterministically to that method's cap and record the depth actually used for every arm |
 | Backbone-only ablation is ambiguous (partial degradation) | fall back on A1.2's graded per-atom sensitivity, which gives a continuous answer rather than a binary |
 | REMARK 350 missing/malformed for some entries | skip those entries, report the fraction skipped; do not silently substitute a predictor |
 | A4 mini-set too small for a stable CV estimate | report the confidence interval and treat the probe as directional only |
