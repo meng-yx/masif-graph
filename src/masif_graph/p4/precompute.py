@@ -80,7 +80,7 @@ def save_chain(cid, pid, chain, surf, g, out_dir, max_vert, state="holo"):
     )
 
 
-def process_complex(cid, out_dir, va_radius, va_kmax, max_vert, state="holo"):
+def process_complex(cid, out_dir, va_radius, va_kmax, max_vert, state="holo", unified=False):
     """Build + save per-chain graphs for one complex in the given conformational STATE.
 
     state='holo': the crystal complex `cid`, plus the holo-defined contact positives.
@@ -97,7 +97,8 @@ def process_complex(cid, out_dir, va_radius, va_kmax, max_vert, state="holo"):
         surf = build_surface_atoms(ch.verts, ch.atom_coords, ch.atom_element, ch.atom_resid,
                                    ch.desc_straight, ch.desc_flipped, ops=("mean",))
         pdb = os.path.join(PDB_DIR, f"{ch.pdb_id}_{ch.chain_ids}.pdb")
-        g = build_hetero_graph(ch, surf, pdb, va_radius=va_radius, va_kmax=va_kmax, max_vert=max_vert)
+        g = build_hetero_graph(ch, surf, pdb, va_radius=va_radius, va_kmax=va_kmax,
+                               max_vert=max_vert, unified_atom_feat=unified)
         save_chain(cid, pid, ch, surf, g, out_dir, max_vert, state=state)
         surfs[pid] = surf
     if state != "holo":
@@ -124,6 +125,9 @@ def main():
     ap.add_argument("--va-radius", type=float, default=5.0)
     ap.add_argument("--va-kmax", type=int, default=8)
     ap.add_argument("--max-vert", type=int, default=0, help="0 = no cap")
+    ap.add_argument("--unified", action="store_true",
+                    help="26-D unified atom features (p6.atoms) instead of the 14-D Phase-4 set; "
+                         "required to match the Phase-6C/7 encoders")
     ap.add_argument("--state", choices=["holo", "af3", "rp"], default="holo",
                     help="conformational state (holo crystal | Phase-3 AF3 model | FASPR repack)")
     args = ap.parse_args()
@@ -133,7 +137,8 @@ def main():
     ok = 0
     for cid in ids:
         try:
-            npos = process_complex(cid, args.out, args.va_radius, args.va_kmax, max_vert, state=args.state)
+            npos = process_complex(cid, args.out, args.va_radius, args.va_kmax, max_vert,
+                                   state=args.state, unified=args.unified)
             if npos is False:
                 print(f"{cid}: unavailable", flush=True)
             else:
