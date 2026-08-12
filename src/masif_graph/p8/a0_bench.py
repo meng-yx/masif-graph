@@ -228,28 +228,52 @@ def cmd_msa(args):
     if args.chai_python and os.path.exists(args.chai_python):
         pqt_dir = os.path.join(args.out_dir, "chai_msas")
         os.makedirs(pqt_dir, exist_ok=True)
+        # chai resolves an MSA as `msa_directory / expected_basename(query_sequence)` — a hash of
+        # the sequence, ONE file per sequence. Writing `{cid}.unpaired.a3m.aligned.pqt` would not
+        # be found, and chai only logs a warning before falling back to a single-sequence MSA: the
+        # "chai + shared MSA" arm would silently have become "chai without MSA". So use chai's own
+        # `expected_basename`, merge unpaired+paired into one frame, and verify the file lands.
+        seqs = {r["cid"]: r for r in ts["chains"]}
+        qmap = {}
+        for r in ts["chains"]:
+            d = json.load(open(r["msa_json"]))
+            for s in d.get("sequences") or []:
+                if "protein" in s:
+                    qmap[r["cid"]] = s["protein"]["sequence"]
+                    break
+        json.dump(qmap, open(os.path.join(args.out_dir, "query_seqs.json"), "w"))
         script = os.path.join(args.out_dir, "_to_pqt.py")
         with open(script, "w") as fh:
             fh.write(
-                "import sys, json, glob, os\n"
+                "import sys, json, os\n"
                 "from pathlib import Path\n"
-                "from chai_lab.data.parsing.msas.aligned_pqt import a3m_to_aligned_dataframe\n"
+                "from chai_lab.data.parsing.msas.aligned_pqt import (\n"
+                "    merge_multi_a3m_to_aligned_dataframe, expected_basename)\n"
                 "from chai_lab.data.parsing.msas.data_source import MSADataSource\n"
-                "a3m_dir, out_dir = sys.argv[1], sys.argv[2]\n"
-                "ok, bad = 0, []\n"
-                "for p in sorted(glob.glob(os.path.join(a3m_dir, '*.a3m'))):\n"
+                "a3m_dir, out_dir, qpath = sys.argv[1], sys.argv[2], sys.argv[3]\n"
+                "qmap = json.load(open(qpath))\n"
+                "ok, bad = [], []\n"
+                "for cid, seq in sorted(qmap.items()):\n"
                 "    try:\n"
-                "        src = MSADataSource.UNIPROT if 'paired' in os.path.basename(p) \\\n"
-                "            else MSADataSource.UNIREF90\n"
-                "        df = a3m_to_aligned_dataframe(Path(p), src)\n"
-                "        df.to_parquet(os.path.join(out_dir, os.path.basename(p) + '.aligned.pqt'))\n"
-                "        ok += 1\n"
+                "        src = {}\n"
+                "        up = Path(a3m_dir) / f'{cid}.unpaired.a3m'\n"
+                "        pa = Path(a3m_dir) / f'{cid}.paired.a3m'\n"
+                "        if up.exists(): src[up] = MSADataSource.UNIREF90\n"
+                "        if pa.exists(): src[pa] = MSADataSource.UNIPROT\n"
+                "        if not src: bad.append(f'{cid}: no a3m'); continue\n"
+                "        df = merge_multi_a3m_to_aligned_dataframe(src)\n"
+                "        dest = Path(out_dir) / expected_basename(seq)\n"
+                "        df.to_parquet(dest)\n"
+                "        ok.append({'cid': cid, 'file': dest.name, 'depth': int(len(df)),\n"
+                "                   'exists': dest.is_file()})\n"
                 "    except Exception as e:\n"
-                "        bad.append(f'{os.path.basename(p)}: {type(e).__name__}: {e}')\n"
-                "print(json.dumps({'converted': ok, 'failed': bad[:10], 'n_failed': len(bad)}))\n")
+                "        bad.append(f'{cid}: {type(e).__name__}: {e}')\n"
+                "print(json.dumps({'converted': len(ok), 'rows': ok,\n"
+                "                  'failed': bad[:10], 'n_failed': len(bad)}))\n")
 
-        pr = subprocess.run([args.chai_python, script, a3m_dir, pqt_dir],
-                            capture_output=True, text=True, timeout=3600)
+        pr = subprocess.run([args.chai_python, script, a3m_dir, pqt_dir,
+                             os.path.join(args.out_dir, "query_seqs.json")],
+                            capture_output=True, text=True, timeout=7200)
         tail = [ln for ln in pr.stdout.splitlines() if ln.startswith("{")]
         conv = json.loads(tail[-1]) if tail else {"error": pr.stderr[-800:]}
         print("chai pqt conversion:", conv)

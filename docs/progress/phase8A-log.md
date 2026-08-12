@@ -160,3 +160,63 @@ Stage A was ever trained on an atom-level objective. Stage A is ~4× better on c
 precision (0.0055 vs 0.0015) and still fails.
 
 Spend: A1 + A3 + A2 ≈ CHF 1.5 so far.
+
+---
+
+## 2026-08-12 — A3 COMPLETE (4 checkpoints), A0 infrastructure up
+
+### A3 — verdict: rigid pose from Stage-1 scores **fails completely**; F3 compute is **not** the problem
+
+Job 66063365, n=269 complexes, 4 checkpoints (Stage-A ×2 seeds, Stage-B ×2 seeds).
+
+| ckpt | cell | success | fnat med | iRMSD med | corr prec | ×chance | hubs | mutual-best |
+|---|---|---|---|---|---|---|---|---|
+| stageA_s0 | HH | 0.000 | 0.045 | 21.2 | 0.0010 | 6 | 77 | 3 |
+| stageA_s0 | AA | 0.000 | 0.049 | 21.9 | 0.0010 | 3 | 77 | 3 |
+| stageB_s0 | HH | 0.000 | 0.059 | 21.3 | 0.0010 | 7 | 370 | 211 |
+| stageB_s1 | AA | 0.000 | 0.068 | 21.6 | 0.0020 | 8 | 392 | 277 |
+
+**0% success in every cell of every checkpoint** (pre-registered: fnat ≥ 0.3 AND iRMSD ≤ 4 Å).
+
+Controls, identical in all four runs: **ORACLE** (true native contacts as correspondences) →
+**100% success, fnat 0.982, iRMSD 2.0 Å**; **random** → 0%, fnat 0.000. The pose machinery is
+correct and the failure belongs to the correspondences, not the fitter.
+
+**Correction to the note above.** From an 8-complex smoke test on a Stage-A checkpoint I wrote that
+hub collapse was the mechanism. At full scale that is only half right: **Stage-B checkpoints are
+NOT hub-collapsed** — 370 distinct argmax partners and 211–277 mutual-best pairs, versus 77 and 2–3
+for Stage A. They still score 0%. So plentiful, well-distributed correspondences are not sufficient;
+the atom-level scores are simply not spatially discriminative (precision 0.001–0.002, 3–9× chance).
+Hub collapse is a Stage-A pathology, not the general explanation.
+
+**Fork F3 is settled, and favourably**: **0.57–0.64 s per pair** with embeddings precomputed →
+**~6–7 core-hours for a 40k-partner screen**. Stage 2 is affordable. What it is not, on the current
+Stage-1 scores, is *accurate* — which moves the problem from the compute budget to the objective,
+the same conclusion Phase 7 reached from a different direction.
+
+### A0 — infrastructure complete, GPU arms launched
+
+* **Test set**: 30 chains, 6 balanced strata (5 each), length 62–863. Measured the candidate pool
+  first — pLDDT p01 = 77.5, p50 = 95.3, **1 of 883 chains below 70** — so the corpus has
+  essentially no low-confidence chains, and a median split would have given the calibrated-spread
+  metric no dynamic range. Switched to **quartile extremes**. The small contrast is reported as a
+  limitation, not hidden.
+* **Shared MSA exported and verified**: 30/30 chains → 60 a3m → 30 chai `.aligned.pqt`,
+  merged depth median 43,014 (min 28, max 69,491). 28 unique files because two chain pairs share a
+  sequence (2NXM_A/B, pl4b2i/pl4b32) — correct, not a bug.
+* **Bug caught before it mattered**: chai resolves an MSA as `msa_directory /
+  expected_basename(sequence)` — a sequence hash — and when the file is missing it only *logs a
+  warning* and falls back to a single-sequence MSA. My first conversion wrote
+  `{cid}.unpaired.a3m.aligned.pqt`, which chai would never have found: the "chai + shared MSA" arm
+  would silently have been an MSA-free arm and the benchmark would have been meaningless. Fixed to
+  use chai's own `expected_basename`, merging unpaired+paired into one frame, and the runner now
+  captures chai's own "MSA found … depth=" log line into the result so the claim is checkable.
+* **AF3 NSAMP=5** submitted on Kuma (job 4077883, 5 array tasks, est. CHF 5.17 worst case).
+  Writes to a new dir; the Phase-5/7 NSAMP=1 models are untouched.
+* **Chai** weights (1.1 GB) + ESM2-3B fp16 pre-staged to `/work/upthomae/Meng/chai_downloads`
+  because compute nodes may lack internet.
+* **Protenix is NOT installed** — the `conda_envs/protenix` env exists with torch 2.7.1 but no
+  `protenix` package, so my plan's "zero-install candidate" was wrong. It falls under the §9
+  install timebox and will be reported as "not evaluated" if it does not come up cheaply.
+
+Spend: Jed ≈ CHF 1.5; Kuma AF3 pending (≤ 5.17 worst case).
