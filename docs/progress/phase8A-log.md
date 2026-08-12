@@ -220,3 +220,84 @@ the same conclusion Phase 7 reached from a different direction.
   install timebox and will be reported as "not evaluated" if it does not come up cheaply.
 
 Spend: Jed ≈ CHF 1.5; Kuma AF3 pending (≤ 5.17 worst case).
+
+---
+
+## 2026-08-12 — A0 complete, A1.2 complete, A4 mined + probed
+
+### A0 — AF3 vs Chai-1 on ONE shared alignment
+
+| method | TM | aligned RMSD | spread | ρ(RMSF,pLDDT) | s/chain |
+|---|---|---|---|---|---|
+| AF3, 5 samples | 0.978 | 0.845 | 0.220 | −0.613 | ~60–70 |
+| Chai-1, 5 samples, shared MSA | 0.945 | 1.130 | 0.435 | −0.650 | 73.8 |
+| Chai-1, 5 samples, MSA-free | 0.953 | 1.385 | 0.783 | −0.628 | 74.2 |
+
+Paired per chain (n=30, Wilcoxon), because the medians mislead: chai(MSA) − AF3 is
+**TM −0.001, p=0.38** — indistinguishable. MSA-free costs TM −0.012 (p=0.011) and +0.59 Å
+(p=9.7e-5). The spread advantage for chai is **not** significant (p=0.5 / 0.084).
+
+Shared-MSA consumption verified rather than assumed: **30/30** `msa_found` in the MSA arm and
+**0/30** in the MSA-free arm.
+
+**AF3 at NSAMP=5 costs the same as NSAMP=1** (~60–70 s/chain), because MSA + trunk dominate.
+Phase-7's `NSAMP=1` was leaving four free conformers on the table.
+
+### A1.2 — the conformational test: repack ≈ 91% of the AF3 perturbation
+
+99/100 repacks succeeded; 99/99 graphs rebuilt. **A 14-D/26-D bug was caught here**: `p4.precompute`
+built Phase-4 14-D atom features, which the 26-D Phase-6C/7 encoders cannot consume
+(`mat1 711x14 vs mat2 26x64`). Added `--unified` and verified `atom_feat (2680, 26)` on one complex
+before rebuilding all 99.
+
+| quantity | seed 0 | seed 1 |
+|---|---|---|
+| rel. displacement, FASPR repack | 0.322 | 0.206 |
+| rel. displacement, AF3 | 0.353 | 0.224 |
+| **ratio repack / AF3** | **0.914** | **0.917** |
+
+**A fixed-backbone sidechain repack moves the embedding ~91% as far as a full AF3 re-prediction**,
+in both seeds. Almost everything the encoder feels when handed an apo structure is **sidechain
+rearrangement**, not backbone. Combined with A1 (the encoder reads sidechains) and A2 (apo pocket
+loss is sidechain-mediated), three independent measurements point at the same lever.
+
+Retrieval with the repack substituted into the AF3 slot (n=90, DB=180, chance top-5 0.028):
+
+| cell | s0 | s1 |
+|---|---|---|
+| HH holo–holo | 0.733 | 0.694 |
+| AA repack–repack | 0.700 | 0.706 |
+| shuffled control | 0.033 | 0.033 |
+
+Robust to repacking as well as to AF3 — the drop is −0.033 / +0.012, inside seed spread.
+
+**Correction to the A1 "implicit σ" reading.** Under `sc_all` (feature destruction) Spearman
+(displacement, `flex_depth`) was **+0.38 / +0.60**. Under an actual repack it is **−0.18 / −0.18** —
+the **sign flips**. So the encoder does *not* move more where sidechains are more rotatable when the
+perturbation is a real conformational change; if anything it moves less. One reading is that it has
+learned to be *insensitive* at flexible positions, which is good for robustness and bad for a σ
+head. Either way, **D8-9 cannot assume the σ signal is already present** — the A1 correlation was an
+artefact of the perturbation type, and I should not have called it an implicit σ without this test.
+
+### A4 — mining and the BSA baseline
+
+393/400 entries mined, **1,755 interfaces (1,460 bio / 295 crystal)**. BSA median: bio 1,828 Å²,
+crystal 615 Å².
+
+| arm | AUROC | AP(crystal) |
+|---|---|---|
+| BSA only | **0.827** | 0.474 |
+| + contacts + chain sizes | 0.857 | 0.546 |
+| BSA only, shuffled labels | 0.526 | 0.177 |
+| structural, shuffled labels | 0.512 | 0.173 |
+
+Shuffled controls collapse to chance with AP at prevalence (0.168), so the folds and the CV are
+sound. **This is the D8-7 hard control, now quantified: Stage 3 must beat AUROC 0.827 / AP 0.474.**
+Interface area alone is a strong predictor of "biological", which is exactly why it had to be
+measured before building anything on top of it.
+
+Labelling used the identity-operator rule (both chains under IDENTITY inside one BIOMOLECULE), not
+chain-list co-occurrence, so "chain A plus a symmetry copy of A" is not mislabelled as a biological
+A–B pair.
+
+Surfaces for the embedding arm are building (80 entries / 525 interfaces / ~441 chains).
