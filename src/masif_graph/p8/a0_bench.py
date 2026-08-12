@@ -287,6 +287,122 @@ def cmd_msa(args):
     print(f"wrote {p}")
 
 
+
+# --------------------------------------------------------------------------- score
+MODEL_GLOBS = {
+    "af3":   ["{cid}/seed-*_sample-*/*_model.cif"],
+    "chai":  ["{cid}/pred.model_idx_*.cif"],
+}
+
+
+def _find_models(pred_dir, cid, method):
+    pats = MODEL_GLOBS.get(method, ["{cid}/*.cif"])
+    out = []
+    for pat in pats:
+        out += sorted(glob.glob(os.path.join(pred_dir, pat.format(cid=cid))))
+    return out
+
+
+def _rmsf(models):
+    """Per-residue RMSF across an ensemble, after superposing every sample onto the first.
+
+    Returns (res_ids, rmsf, mean_pairwise_rmsd, max_pairwise_rmsd). An ensemble whose members are
+    identical scores 0 here no matter how accurate it is — which is the point: the spread is what
+    a conformational-landscape sampler is supposed to provide.
+    """
+    from masif_graph.align.global_align import apply_T, kabsch
+    per = []
+    for m in models:
+        r, c, _ = _read_any_ca(m)
+        per.append({int(x): y for x, y in zip(r, c)})
+    shared = sorted(set.intersection(*[set(d) for d in per])) if per else []
+    if len(shared) < 3 or len(per) < 2:
+        return np.array(shared), np.array([]), float("nan"), float("nan")
+    X = np.stack([np.array([d[r] for r in shared]) for d in per])       # (S, R, 3)
+    ref = X[0]
+    X = np.stack([X[0]] + [apply_T(kabsch(x, ref), x) for x in X[1:]])
+    mu = X.mean(0)
+    rmsf = np.sqrt(((X - mu) ** 2).sum(2).mean(0))
+    pw = [float(np.sqrt(((X[i] - X[j]) ** 2).sum(1).mean()))
+          for i in range(len(X)) for j in range(i + 1, len(X))]
+    return np.array(shared), rmsf, float(np.mean(pw)), float(np.max(pw))
+
+
+def cmd_score(args):
+    from scipy.stats import spearmanr
+    ts = json.load(open(args.testset))
+    rows = []
+    for r in ts["chains"]:
+        cid = r["cid"]
+        models = _find_models(args.pred_dir, cid, args.method)
+        e = {"cid": cid, "length": r["length"], "n_models": len(models)}
+        if not models:
+            e["error"] = "no models found"
+            rows.append(e)
+            continue
+        tm = tmscore(models[0], r["holo"])
+        e.update({("tm_score" if k == "tm_ref_normalised" else k): v for k, v in tm.items()})
+        # TMalign's own RMSD over structurally aligned residues is the RMSD to trust. The
+        # residue-id-matched value is kept only as a diagnostic: a raw AF3/chai model is numbered
+        # 1..N while the holo PDB uses author numbering, so id-matching can pair up unrelated
+        # residues and produce a large-but-meaningless RMSD.
+        e["ca_rmsd_resid_matched_UNRELIABLE"], e["n_ca_matched"] = ca_rmsd_by_resid(
+            models[0], r["holo"])
+        res, rmsf, pw_mean, pw_max = _rmsf(models)
+        e["pairwise_rmsd_mean"], e["pairwise_rmsd_max"] = pw_mean, pw_max
+        e["rmsf_mean"] = float(rmsf.mean()) if rmsf.size else float("nan")
+        # calibration: does the ensemble spread track REAL flexibility?
+        if rmsf.size:
+            hr, _, hb = _read_any_ca(r["holo"])
+            hmap = {int(x): y for x, y in zip(hr, hb)}
+            m = np.array([hmap.get(int(x), np.nan) for x in res], float)
+            ok = np.isfinite(m) & np.isfinite(rmsf)
+            if ok.sum() > 10 and np.std(m[ok]) > 0 and np.std(rmsf[ok]) > 0:
+                e["spearman_rmsf_vs_bfactor"] = float(spearmanr(rmsf[ok], m[ok]).statistic)
+            pr, _, pb = _read_any_ca(models[0])
+            pmap = {int(x): y for x, y in zip(pr, pb)}
+            q = np.array([pmap.get(int(x), np.nan) for x in res], float)
+            ok = np.isfinite(q) & np.isfinite(rmsf)
+            if ok.sum() > 10 and np.std(q[ok]) > 0 and np.std(rmsf[ok]) > 0:
+                e["spearman_rmsf_vs_plddt"] = float(spearmanr(rmsf[ok], q[ok]).statistic)
+        # cost, where the runner recorded it
+        rj = os.path.join(args.pred_dir, cid, "run.json")
+        if os.path.exists(rj):
+            e["seconds"] = json.load(open(rj)).get("seconds")
+            e["msa_found"] = json.load(open(rj)).get("msa_found")
+        rows.append(e)
+        print(f"  {cid}: n={len(models)} TM={e.get('tm_score', float('nan')):.3f} "
+              f"alnRMSD={e.get('tm_rmsd', float('nan')):.2f} "
+              f"spread={pw_mean:.2f}", flush=True)
+
+    def agg(key):
+        v = [x[key] for x in rows if isinstance(x.get(key), (int, float))
+             and np.isfinite(x.get(key))]
+        if not v:
+            return None
+        return {"n": len(v), "mean": float(np.mean(v)), "median": float(np.median(v)),
+                "p25": float(np.percentile(v, 25)), "p75": float(np.percentile(v, 75))}
+
+    out = {"method": args.method, "pred_dir": args.pred_dir, "n_chains": len(rows),
+           "n_with_models": sum(1 for x in rows if x["n_models"] > 0),
+           "summary": {k: agg(k) for k in
+                       ("tm_score", "tm_rmsd", "pairwise_rmsd_mean", "pairwise_rmsd_max",
+                        "rmsf_mean", "spearman_rmsf_vs_bfactor", "spearman_rmsf_vs_plddt",
+                        "seconds", "n_models")},
+           "per_chain": rows}
+    os.makedirs(os.path.dirname(args.out) or ".", exist_ok=True)
+    json.dump(out, open(args.out, "w"), indent=2)
+    s = out["summary"]
+    print("=" * 78)
+    print(f"A0 {args.method}: {out['n_with_models']}/{len(rows)} chains with models")
+    for k in ("tm_score", "tm_rmsd", "pairwise_rmsd_mean", "spearman_rmsf_vs_bfactor",
+              "spearman_rmsf_vs_plddt", "seconds"):
+        v = s.get(k)
+        if v:
+            print(f"  {k:26s} median {v['median']:8.3f}  [p25 {v['p25']:.3f}, p75 {v['p75']:.3f}]  n={v['n']}")
+    print(f"wrote {args.out}")
+
+
 def main():
     ap = argparse.ArgumentParser()
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -302,6 +418,13 @@ def main():
     m.add_argument("--out-dir", default="/work/upthomae/Meng/phase8A/a0_msa")
     m.add_argument("--chai-python", default="/home/ymeng/miniconda3/envs/chai/bin/python")
     m.set_defaults(func=cmd_msa)
+
+    c = sub.add_parser("score")
+    c.add_argument("--testset", default="logs/phase8A/a0/testset.json")
+    c.add_argument("--pred-dir", required=True)
+    c.add_argument("--method", required=True, choices=["af3", "chai", "other"])
+    c.add_argument("--out", required=True)
+    c.set_defaults(func=cmd_score)
 
     args = ap.parse_args()
     args.func(args)
