@@ -35,13 +35,18 @@ def metrics(ranks):
 
 
 @torch.no_grad()
-def run(args):
+def run(args, transform=None):
+    """`transform(rec)` (optional) mutates each accepted Rec's graphs before encoding — used by
+    Phase-8 A1 to run this identical benchmark on ablated graphs. It must preserve the surface row
+    order, since `Rec.inter` indexes those rows (see `p8.ablate`)."""
     dev = args.device
     ids = [l.strip() for l in open(args.ids) if l.strip() and not l.startswith("#")]
     recs = []
     for cid in ids:
         r = Rec(args.data, cid, args.pos_key, dev)
         if r.ok and r.has_af3 and len(r.inter) >= args.min_pos:
+            if transform is not None:
+                transform(r)
             recs.append(r)
     print(f"usable complexes (holo+af3+>= {args.min_pos} '{args.pos_key}'): {len(recs)}/{len(ids)}"
           f"  -> DB {2*len(recs)} chains", flush=True)
