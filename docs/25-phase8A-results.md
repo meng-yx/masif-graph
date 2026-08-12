@@ -135,7 +135,29 @@ is not accurate.
 | **usable (exact + subsequence + ≥95%)** | **9,080** | **74.4** |
 
 **The decision-relevant number is per COMPLEX, not per chain**: a 1:1 apo training pair needs *both*
-partners. **3,400 / 4,943 training complexes = 68.8%** have both sides AFDB-usable.
+partners. But "usable" depends entirely on how much sequence mismatch you will tolerate, and that in
+turn is set by how you intend to define training positives on the apo model:
+
+| definition of usable | training complexes, both sides | % |
+|---|---|---|
+| **exact only** (identical entity sequence) | 625 | **12.6** |
+| exact + subsequence (truncate the AFDB model) | 1,253 | **25.3** |
+| exact + subsequence + ≥95% identity | 3,400 | 68.8 |
+
+**The 68.8% headline is the permissive reading and should not be used on its own.** Positives are
+defined by mapping holo interface atoms onto the apo model through an identity join on
+`(chain, resseq, name)`; every mismatched residue drops out of the positive set. If the corpus is
+required to have exact atom correspondence, **AFDB covers only 12.6% of complexes** — and 25.3% if
+subsequence hits are truncated to the crystal construct.
+
+Definitions, precisely:
+* **exact** — the RCSB entity canonical sequence (`pdbx_seq_one_letter_code_can`, i.e. SEQRES) equals
+  the AFDB `uniprotSequence` in full: 100% identity **and** 100% coverage. Note this is a *sequence*
+  guarantee, not an atom-set guarantee — the crystal may still leave residues unresolved.
+* **subsequence** — the entity sequence is a contiguous substring of the AFDB sequence: 100%
+  identity over the aligned region, <100% coverage of the AFDB model.
+* **≥95%** — biotite `get_sequence_identity(..., mode="shortest")`: matches divided by the length of
+  the **shorter full sequence**, not by the aligned region only.
 
 A parsing bug worth recording: a list "side" concatenates chains (`1A14_HL_N` is an antibody
 heavy+light against an antigen). Treating `HL` as one chain id put ~11% of the corpus into a fake
@@ -286,12 +308,14 @@ interface-level judgements Stages 2 and 3 need.
 
 Stage A produces evidence; the choice of method and holo:apo ratio is yours. What the evidence says:
 
-**1. AFDB coverage is real but heterogeneous.** 68.8% of training complexes have both sides usable —
-but only **13.6% of chains are exact sequence matches**. 18.2% are *subsequences* (the crystal
-construct is a domain of a larger AFDB protein, so the model carries extra domains that must be
-trimmed) and 42.6% are merely ≥95% identical (point mutants, tags). Option A therefore buys coverage
-at the cost of a **heterogeneous corpus** with three different kinds of sequence relationship, plus a
-local-prediction fallback for the remaining 31%.
+**1. AFDB coverage is far weaker than the headline once positives must be mappable.** Requiring an
+exact sequence match — the only case where holo interface atoms transfer to the apo model with no
+loss — leaves **12.6% of training complexes**, not 68.8%. Truncating subsequence hits to the crystal
+construct raises it to 25.3%. The 68.8% figure needs the ≥95% class, which is 42.6% of chains and
+means point mutants and tagged constructs whose mismatched residues drop out of the positive set.
+Option A therefore buys coverage at the cost of a corpus with three different kinds of sequence
+relationship — and, at the strict setting that keeps positives clean, it barely covers an eighth of
+the corpus.
 
 **2. Local prediction is cheaper than it looked, and uniform.** Chai-1 on the shared MSA is
 statistically indistinguishable from AF3 (TM Δ −0.001, p=0.38). **MSA-free** chai costs only
