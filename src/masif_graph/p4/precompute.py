@@ -27,6 +27,17 @@ def af3_state_id(holo_id: str) -> str:
     return f"{pdb}AF_{c1}_{c2}"
 
 
+def rp_state_id(holo_id: str) -> str:
+    """Phase-2 fixed-backbone FASPR-repack id (scripts/repack_one.sh writes `{PDB}RP_{c1}_{c2}`).
+
+    Used by Phase-8 A1.2: a repack keeps sidechain IDENTITY and changes only the rotamer, which is
+    the conformational perturbation an apo structure actually applies — the one A1's feature
+    shuffling does not test.
+    """
+    pdb, c1, c2 = holo_id.split("_")
+    return f"{pdb}RP_{c1}_{c2}"
+
+
 def _keys(chain, surf):
     ks = []
     for r in surf.atom_idx:
@@ -77,7 +88,7 @@ def process_complex(cid, out_dir, va_radius, va_kmax, max_vert, state="holo"):
                   holo `cid` prefix + '__af3__' so eval can identity-join AF3 rows to holo contacts.
                   Contacts are NOT recomputed (they are defined by the holo complex geometry).
     """
-    state_id = cid if state == "holo" else af3_state_id(cid)
+    state_id = {"holo": lambda x: x, "af3": af3_state_id, "rp": rp_state_id}[state](cid)
     if not complex_is_available(state_id):
         return False
     p1, p2 = load_complex(state_id)
@@ -113,8 +124,8 @@ def main():
     ap.add_argument("--va-radius", type=float, default=5.0)
     ap.add_argument("--va-kmax", type=int, default=8)
     ap.add_argument("--max-vert", type=int, default=0, help="0 = no cap")
-    ap.add_argument("--state", choices=["holo", "af3"], default="holo",
-                    help="conformational state to build (holo crystal or Phase-3 AF3 model)")
+    ap.add_argument("--state", choices=["holo", "af3", "rp"], default="holo",
+                    help="conformational state (holo crystal | Phase-3 AF3 model | FASPR repack)")
     args = ap.parse_args()
     os.makedirs(args.out, exist_ok=True)
     max_vert = args.max_vert if args.max_vert > 0 else None
