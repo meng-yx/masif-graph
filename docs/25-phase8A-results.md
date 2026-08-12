@@ -162,9 +162,34 @@ crystallographic B-factors (ρ = +0.352) — but it is **small in magnitude** (m
 *quartile extremes* rather than a median split, and even the "low-confidence" stratum is ~90 pLDDT.
 Conformational diversity from resampling will be limited on this corpus **whatever method is chosen**.
 
-### 5.3 Chai-1
+### 5.3 Chai-1, on the identical MSA
 
-*(filled in below when the runs complete)*
+30/30 chains in both arms. **The shared-MSA design was verified, not assumed**: chai logs
+"MSA found for sequence …" and the runner captures it — 30/30 in the MSA arm, **0/30** in the
+MSA-free arm. (This mattered: chai resolves an MSA as `msa_directory / expected_basename(sequence)`,
+a sequence hash, and on a miss it only *warns* before falling back to a single sequence. The first
+naming would have made "chai + shared MSA" silently identical to "chai without MSA".)
+
+| method | TM-score | aligned RMSD (Å) | ensemble spread (Å) | ρ(RMSF, pLDDT) | s/chain |
+|---|---|---|---|---|---|
+| AF3, 5 samples, shared MSA | 0.978 | 0.845 | 0.220 | −0.613 | ~60–70 |
+| Chai-1, 5 samples, shared MSA | 0.945 | 1.130 | 0.435 | −0.650 | 73.8 |
+| Chai-1, 5 samples, **MSA-free** | 0.953 | 1.385 | 0.783 | −0.628 | 74.2 |
+
+Medians mislead here, so the comparison is **paired per chain** (n=30, Wilcoxon):
+
+| comparison | TM-score Δ | aligned RMSD Δ | spread Δ |
+|---|---|---|---|
+| chai(MSA) − AF3 | **−0.001, p=0.38** | +0.085 Å, p=0.052 | +0.129 Å, p=0.5 |
+| chai(no MSA) − AF3 | −0.012, **p=0.011** | +0.590 Å, **p=9.7e-5** | +0.361 Å, p=0.084 |
+
+**Chai-1 on the shared MSA is statistically indistinguishable from AF3 on accuracy** (TM p=0.38;
+RMSD borderline at p=0.052). Dropping the MSA costs a small but real amount: TM −0.012 and
++0.59 Å RMSD. The spread differences favour chai but are **not significant at n=30**, so "chai
+samples more broadly" is suggestive only.
+
+Inference cost is comparable (~74 s vs ~60–70 s per chain), and both numbers exclude MSA *search*.
+The MSA-free arm's real advantage is that it needs no search at all.
 
 ## 6. A1.2 — repack sensitivity
 
