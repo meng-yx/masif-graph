@@ -257,8 +257,8 @@ before anything is built on top of it. Adding trivial geometry buys +0.030 AUROC
 
 ### 7.1 Do the Stage-1 embeddings add anything? **No.**
 
-For 80 of the mined entries we built reference surfaces and 26-D graphs (455 pairs surfaced, 413
-scorable), so the learned bilinear score `z_i^T T z_j` over contacting atom pairs could be summarised
+For 80 of the mined entries we built reference surfaces and 26-D graphs (471 pairs surfaced in the
+end; graphs were built from the 455 available at that moment, of which 413 were scorable), so the learned bilinear score `z_i^T T z_j` over contacting atom pairs could be summarised
 per interface (mean / max / median / p90) and added as a third arm. **All arms are compared on the
 identical 413 rows** — the first run silently dropped the embedding arm because 42 interfaces lacked
 features, which would have compared arms on different populations.
@@ -346,8 +346,10 @@ Stages 2 and 3 into one. **This is worth your decision alongside D8-12.**
 * **A4's embedding arm covers 413 of 1,755 mined interfaces** (80 entries surfaced of 393 mined),
   deliberately enriched for crystal contacts. The BSA/structural baselines are reported on the full
   1,755; the three-arm comparison on the 413.
-* Two of twenty A4 surface tasks were cancelled after 2 h once both seeds of the probe had run; 455
-  of 525 selected pairs were surfaced (29 failed in the reference pipeline).
+* Two of twenty A4 surface tasks were cancelled after 2 h once both seeds of the probe had run.
+  **471 of 525** selected pairs were surfaced (29 failed in the reference pipeline, the rest
+  cancelled); the embedding arm used the **455** available when graphs were built. The extra 16
+  would not move a two-seed null, so the probe was not rerun.
 * These omissions narrow A0 to AF3 vs Chai-1. That is enough to answer "is there a cheaper
   alternative to AF3 at comparable quality", which is the D8-12 question, but it is not the full
   five-method sweep the plan proposed.

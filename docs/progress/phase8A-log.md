@@ -306,7 +306,8 @@ Surfaces for the embedding arm are building (80 entries / 525 interfaces / ~441 
 
 ## 2026-08-12 — A4 embedding arm, Stage A COMPLETE
 
-455/525 selected pairs surfaced (29 pipeline failures), 455 graphs built at 26-D, 413 interfaces
+471/525 selected pairs surfaced in the end (29 pipeline failures, rest cancelled); graphs were
+built from the 455 available at that moment, of which 413 interfaces were
 scorable with the Stage-1 bilinear score. **All arms compared on the identical 413 rows** — the
 first run silently dropped the embedding arm because 42 interfaces lacked features, which would
 have compared arms on different populations.
