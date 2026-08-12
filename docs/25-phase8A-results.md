@@ -19,8 +19,11 @@ every checkpoint, while the same fitter given true correspondences succeeds on *
 atom-level scores are not spatially discriminative — a direct consequence of training on a
 chain-level `median-of-max` objective that never penalised a bad argmax. Fork **F3 is settled
 favourably** (≈0.6 s/pair → ~6 core-hours per 40k screen), so the obstacle is the objective, not the
-compute. For D8-12, **AFDB covers 68.8% of training complexes on both sides**, and AF3 at five
-diffusion samples costs the same as one.
+compute. A fourth measurement (A4) says the same embeddings add **nothing** over interface area for
+telling a biological interface from a crystal contact. For D8-12, **AFDB covers 68.8% of training
+complexes on both sides** but only 13.6% as exact sequence matches; **chai-1 on a shared MSA is
+statistically indistinguishable from AF3**; AF3 at five diffusion samples costs the same as one; and
+a **FASPR repack reproduces 91% of the AF3 perturbation at zero GPU cost**.
 
 ## 1. Provenance (per CLAUDE.md, stated before any result)
 
@@ -252,6 +255,33 @@ to chance with AP at prevalence (0.168), so the folds and the metric are sound.
 Interface area alone is a strong predictor of "biological", which is exactly why it needed measuring
 before anything is built on top of it. Adding trivial geometry buys +0.030 AUROC.
 
+### 7.1 Do the Stage-1 embeddings add anything? **No.**
+
+For 80 of the mined entries we built reference surfaces and 26-D graphs (455 pairs surfaced, 413
+scorable), so the learned bilinear score `z_i^T T z_j` over contacting atom pairs could be summarised
+per interface (mean / max / median / p90) and added as a third arm. **All arms are compared on the
+identical 413 rows** — the first run silently dropped the embedding arm because 42 interfaces lacked
+features, which would have compared arms on different populations.
+
+n=413 (259 bio / 154 crystal; note this subset was deliberately enriched for crystal contacts, so its
+prevalence 0.373 differs from the full set's 0.168 and the AUROCs are **not** comparable to §7 above):
+
+| arm | seed 0 AUROC | seed 1 AUROC | AP(crystal) s0 / s1 |
+|---|---|---|---|
+| BSA only | 0.841 | 0.841 | 0.775 / 0.775 |
+| + contacts + chain sizes | **0.863** | **0.863** | 0.794 / 0.794 |
+| **+ Stage-1 embedding summaries** | 0.852 | 0.855 | 0.773 / 0.780 |
+| shuffled controls | 0.531–0.542 | 0.531–0.542 | ≈ prevalence |
+
+**The Stage-1 embeddings add nothing** — both seeds land slightly *below* the structural arm, which
+is what four uninformative features do to a linear model on 413 rows. So the current encoder carries
+no usable bio-vs-crystal signal beyond interface area and size.
+
+This is a **warning, not a gate** (a trained pose-level network is a different model). But taken with
+A3 — where the same embeddings could not place a pose — it is the second independent indication that
+the current Stage-1 representation is tuned for *chain-level retrieval* and not for the atom- or
+interface-level judgements Stages 2 and 3 need.
+
 ## 8. Recommendation for D8-12 — **the decision is yours**
 
 Stage A produces evidence; the choice of method and holo:apo ratio is yours. What the evidence says:
@@ -303,11 +333,21 @@ RANSAC pose step with a learned pose module trained end-to-end (D8-10 already an
 differentiability); or (c) skip explicit poses and score interfaces directly, which would collapse
 Stages 2 and 3 into one. **This is worth your decision alongside D8-12.**
 
-## 9. What was NOT evaluated
+## 9. Cost
+
+≈ **CHF 12** total: Jed CPU (A1 ablations, A3 poses, A2, repacks, A4 surfaces/graphs, AFDB sweep)
+≈ CHF 6; Kuma GPU (AF3 `NSAMP=5` on 30 chains, chai ×2 arms ×30 chains) ≈ CHF 6. No training.
+
+## 10. What was NOT evaluated
 
 * **Protenix**: the `conda_envs/protenix` env exists (torch 2.7.1, cuequivariance) but the
   `protenix` package is **not installed** — my plan's "zero-install candidate" was wrong.
 * **Boltz-2, ESMFold**: not installed; fall under the §9 install timebox.
+* **A4's embedding arm covers 413 of 1,755 mined interfaces** (80 entries surfaced of 393 mined),
+  deliberately enriched for crystal contacts. The BSA/structural baselines are reported on the full
+  1,755; the three-arm comparison on the 413.
+* Two of twenty A4 surface tasks were cancelled after 2 h once both seeds of the probe had run; 455
+  of 525 selected pairs were surfaced (29 failed in the reference pipeline).
 * These omissions narrow A0 to AF3 vs Chai-1. That is enough to answer "is there a cheaper
   alternative to AF3 at comparable quality", which is the D8-12 question, but it is not the full
   five-method sweep the plan proposed.

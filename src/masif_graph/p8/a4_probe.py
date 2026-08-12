@@ -88,6 +88,15 @@ def main():
 
     d = json.load(open(args.interfaces))
     iface = d["interfaces"]
+    # If ANY interface carries embedding features, restrict every arm to the subset that has them.
+    # Otherwise the embedding arm would be silently dropped (it needs all rows) or, worse, the arms
+    # would be compared on different populations.
+    n_all = len(iface)
+    n_emb = sum("emb_score_mean" in x for x in iface)
+    if 0 < n_emb < n_all:
+        iface = [x for x in iface if "emb_score_mean" in x]
+        print(f"restricting all arms to the {len(iface)}/{n_all} interfaces with embedding "
+              f"features, so arms are compared on identical rows", flush=True)
     y = np.array([x["bio"] for x in iface])
     groups = np.array([x["pdb"] for x in iface])
     use_embed = bool(iface) and all("emb_score_mean" in x for x in iface)

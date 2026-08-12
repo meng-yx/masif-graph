@@ -301,3 +301,34 @@ chain-list co-occurrence, so "chain A plus a symmetry copy of A" is not mislabel
 A–B pair.
 
 Surfaces for the embedding arm are building (80 entries / 525 interfaces / ~441 chains).
+
+---
+
+## 2026-08-12 — A4 embedding arm, Stage A COMPLETE
+
+455/525 selected pairs surfaced (29 pipeline failures), 455 graphs built at 26-D, 413 interfaces
+scorable with the Stage-1 bilinear score. **All arms compared on the identical 413 rows** — the
+first run silently dropped the embedding arm because 42 interfaces lacked features, which would
+have compared arms on different populations.
+
+| arm | s0 | s1 |
+|---|---|---|
+| BSA only | 0.841 | 0.841 |
+| + contacts + chain sizes | **0.863** | **0.863** |
+| + Stage-1 embedding summaries | 0.852 | 0.855 |
+| shuffled | 0.531–0.542 | 0.531–0.542 |
+
+**The embeddings add nothing** (both seeds slightly below the structural arm). Second independent
+indication, after A3, that the current Stage-1 representation serves chain-level retrieval and not
+the atom- or interface-level judgements Stages 2 and 3 require.
+
+The last two A4 surface array tasks were **cancelled** after 2 h once both probe seeds had run —
+more pairs would not have changed a two-seed null.
+
+**Stage A is complete.** `docs/25-phase8A-results.md` written; `logs/PHASE8A_DONE` touched.
+Total ≈ CHF 12 (Jed ≈ 6, Kuma ≈ 6), no training, nothing irreversible.
+
+**PAUSED for the user**, per plan §9, on two decisions:
+1. **D8-12** — apo-prediction method and holo:apo ratio. Recommendation in docs/25 §8.
+2. **The A3 consequence** — Stage 2 cannot be built on the current Stage-1 scores. Options in
+   docs/25 §8.1. Not acted on unilaterally because it reorders the phase.
