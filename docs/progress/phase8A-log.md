@@ -70,3 +70,93 @@ Expected signal: `logs/phase8A/a1/{disp_*.json, ret_*_<ablation>.json}`.
 run through the *identical* benchmark rather than a reimplementation. Non-breaking (default `None`).
 
 Spend so far: ~CHF 0 (login-node work) + job 66063328 pending.
+
+---
+
+## 2026-08-12 — A1 COMPLETE (both seeds), A2 COMPLETE, A3 launched
+
+### A1 — verdict: the encoder is **NOT** sidechain-blind
+
+Job 66063328, both seeds, 7 ablations each. Retrieval (HH top-5, 287-clean, DB=538, chance 0.0093):
+
+| ablation | s0 | s1 | mean | Δ vs none |
+|---|---|---|---|---|
+| `none` | 0.651 | 0.638 | **0.644** | — |
+| `sc_feat` | 0.353 | 0.257 | 0.305 | **−0.339** |
+| `sc_edge` | 0.600 | 0.357 | 0.479 | −0.165 |
+| `sc_all` | 0.294 | 0.134 | 0.214 | **−0.430** |
+| `bb_feat` | 0.543 | 0.416 | 0.480 | −0.164 |
+| `vert_feat` | 0.387 | 0.301 | 0.344 | −0.300 |
+| `all_feat` | 0.043 | 0.020 | 0.032 | −0.612 |
+
+**Both required checks pass.** `none` reproduces the published 0.651 / 0.638 exactly (Phase-7 §2,
+0.644 ± 0.007) — the harness is the same benchmark, not a lookalike. `all_feat` collapses to 0.032
+with median rank 166, i.e. ~chance — the ablation harness can detect destruction, so the other rows
+are interpretable.
+
+Isolating sidechain atoms costs **70% of everything the graph carries** (−0.430 of −0.612).
+Sidechain chemistry matters **more** than backbone chemistry (−0.339 vs −0.164) and more than the
+entire surface-vertex channel (−0.300). The unflattering explanation for Phase 5's robustness —
+"robust because it never reads sidechains" — is **refuted**.
+
+**Displacement probe** (n=52 complexes, per-surface-atom, dimensionless vs the natural z spread):
+
+| ablation | relDisp sidechain rows | relDisp backbone rows |
+|---|---|---|
+| `sc_feat` | 0.601 / 0.429 | 0.249 / 0.173 |
+| `sc_all` | 0.833 / 1.398 | 0.445 / 0.296 |
+| `bb_feat` | 0.163 / 0.140 | 1.387 / 2.175 |
+
+The response is **spatially specific**: sidechain ablations move sidechain rows ~2-5x more than
+backbone rows and `bb_feat` cleanly reverses it. Independent confirmation the ablations do what
+they claim.
+
+**Implicit σ (D8-9 / D8-19)**: Spearman(displacement under `sc_all`, `flex_depth`) = **+0.381**
+(s0) / **+0.599** (s1), p≈0, n=90,121. The encoder already moves more where sidechains are more
+rotatable. **Caveat, stated up front:** `flex_depth` is itself input feature col 22, so this shows
+the representation is *organised by* flexibility, not that it learned flexibility from physics. Even
+so it means a σ head would be predicting something already partly present rather than from scratch.
+
+**What A1 does NOT show.** It perturbs sidechain *identity/chemistry*, whereas AF3 apo models keep
+identity and change *conformation*. So A1 says "reads sidechains" and Phase 5 says "robust to
+conformation" — compatible, and together the property we want. The direct conformational test is
+**A1.2 (FASPR repack)**, which is therefore not optional.
+
+Seed spread is wide (`sc_all` 0.294 vs 0.134); the **ordering** is identical across seeds, the
+magnitudes are not. Reported as ranks, not as precise deltas.
+
+### A2 — verdict: pockets mostly do NOT close; the tail is sidechain-mediated
+
+298/298 complexes, **0 failures**.
+
+* buried fraction: holo median 0.851, AF3 median 0.840, **ratio median 1.001** (p05 0.634, p95 1.124)
+* clashes @2.0 Å: holo median 0 (p95 **0**) vs AF3 median 1 (p95 19) — the holo control is exactly 0,
+  so the clash metric is calibrated rather than assumed
+* AF3 clash split: backbone median 0, **sidechain median 1**
+* **pre-registered "collapsed": 60/298 = 20.1%**
+
+So apo input does not broadly destroy the pocket — the median complex is unchanged — but a **fifth**
+of cases do degrade, and the degradation is **sidechain-mediated**, which a repack step can recover.
+That is a Stage-B design input, not a blocker. Added a `ca_rmsd_in_frame` confound control so
+"collapsed" can be checked against "badly superposed" rather than assumed distinct.
+
+### A3 — launched (job 66063365, 4 checkpoints)
+
+Built with the controls first, and they changed the design:
+
+* **ORACLE control** (true native contacts as correspondences): fnat 0.971, iRMSD 2.0 Å, **100%
+  success**. The pose machinery is sound, so a failure of the learned arm is a result.
+* **random control**: 0% success, fnat 0.000.
+* **learned arm: 0% success in all four cells**, iRMSD ~25 Å, correspondence precision 0.0045–0.0065
+  (15–23× chance, but nowhere near usable).
+* **Mechanism found**: the atom-level score matrix is **hub-collapsed** — for ~511 query atoms only
+  ~51–64 distinct partners are *ever* the argmax, and there are **2–3 mutual-best pairs** in a
+  ~500×500 matrix. Chain-level retrieval works because `median_i max_j` aggregates over many atoms;
+  that statistic is indifferent to hubs, so nothing in the training objective ever penalised them.
+
+Both Stage-A (atom-level contrastive) and Stage-B (retrieval-tuned) checkpoints are being run —
+scoring only the retrieval-tuned model would have been an unfair test of pose prediction, since only
+Stage A was ever trained on an atom-level objective. Stage A is ~4× better on correspondence
+precision (0.0055 vs 0.0015) and still fails.
+
+Spend: A1 + A3 + A2 ≈ CHF 1.5 so far.
