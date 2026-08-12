@@ -226,7 +226,9 @@ coverage gaps and for the multi-seed ensembles of D8-9.
 
 **D8-9 — Per-atom tolerance via probabilistic embeddings.** Stage 1 emits a mean **and a learned
 per-atom variance σ**; complementarity scoring becomes variance-aware, so flexible atoms tolerate
-mismatch and rigid atoms demand precision. σ is supervised by observed conformational spread:
+mismatch and rigid atoms demand precision. σ is supervised **primarily by the apo-substituted pairs of D8-14** (a real interface whose apo
+partners fit imperfectly is a direct lesson in tolerable mismatch), and secondarily by observed
+conformational spread:
 **AF3 multi-seed ensembles** (`run_m2_ensemble.py` already measured inter-sample CA-RMSD of ~0.1 Å
 for confident chains up to ~15 Å for uncertain ones), **FASPR fixed-backbone repacks**
 (`scripts/repack_one.sh`), and pLDDT/PAE as priors.
@@ -240,6 +242,64 @@ fine-tuning beats frozen Stage 1" is an explicit gate, not an assumption.
 
 **D8-11 — Seeds.** ≥2 per condition for every claim, per Phase-7 (D7-6).
 
+**D8-15 — ONE global split, defined before Stage B, applied to every stage.** Stage 1's encoder sees
+interfaces; if Stage 3's evaluation set overlaps Stage 1's training data, **leakage flows through the
+encoder** and no per-stage split can detect it. Phase 5 already shipped a leak at the complex level;
+this is the same failure one architectural level up.
+**Clustering is at the INTERFACE level, not the chain level.** The same protein crystallises many
+times, so its lattice contacts recur as near-duplicates across entries; chain-level sequence
+clustering will not remove them and a "held-out" set full of near-copies reports inflated numbers.
+Cluster on (sequence-cluster pair + interface similarity), and verify against the *actual* training
+ids as in Phase 6C.
+
+**D8-16 — Guard against label circularity.** PDB assembly annotations are partly software-derived
+(PISA-like). Training on them and then claiming to beat PISA-class methods would be circular. Train
+on the broad set, but reserve a **manually curated / author-defined-only benchmark** (PiQSi, the DC
+set) — untouched by training — for the headline number.
+
+**D8-17 — Two baselines, not one.** The **BSA-only** baseline (D8-7) is the shuffled-control: it
+proves we learned *something*. A **published bio-vs-crystal classifier** (EPPIC-class) is the
+comparator: it says whether what we learned is worth anything. Given D8-5b may show conservation
+dominates, we need the field's bar on the same benchmark, not just our own.
+
+**D8-18 — Deployment-realistic metrics; AUC is not the headline.** Screening ~40k domains for 1–10
+true partners means operating at FPR ~1e-4, where AUC is nearly uninformative. Headline numbers are
+**enrichment factor at 0.1% and 1%, and precision@k**. Correspondingly **Stage 1's recall gate has an
+operating point**: recall@top-1% of a 40k-entry database, because that is the shortlist Stage 2 can
+afford to process (§6.5).
+
+**D8-19 — σ must be shown to be meaningful, not merely present.** The learned per-atom σ is validated
+against independent flexibility measures — B-factors, ensemble RMSF, pLDDT — before any claim that
+the model has learned adaptive tolerance. Without this, σ can silently absorb noise and "adaptive
+tolerance" becomes a story rather than a finding.
+
+**D8-14 — Apo enters training by CONFORMER SUBSTITUTION into crystal-derived poses.** An earlier
+draft of this document claimed Stage 3's training data was "crystal-derived by necessity" and that
+apo could therefore only be an evaluation state. **That was wrong** (user, 2026-08-11). The label
+comes from the crystal, but the *structure* need not: superpose each partner's apo model onto its
+holo chain, keep the crystal relative pose, and recompute contacts — the interface label transfers.
+This works for biological interfaces and lattice contacts alike.
+
+**The machinery already exists.** `p4.dataset.ComplexP4B` (Phase-4 M2) loads holo *and* AF3 graphs
+for both chains and precomputes positives remapped into all four combinations —
+`(holo,holo)`, `(af3,holo)`, `(holo,af3)`, `(af3,af3)` — joined on `(chain, resseq, name)`, with a
+`min_retention` filter so a badly-mismatched apo model is never injected as a positive. Phase 7 did
+the same on the ligand side (`p7/pl_af3.py`; contact ratio AF3/holo median **0.99**, zero failures).
+**The barrier to apo-augmented training has always been data, never implementation.**
+
+Consequences:
+* The apo generation run **precedes Stage C**, it is not deferred to Stage D. This front-loads the
+  CHF 150–560.
+* `holo–holo → apo–holo → apo–apo` is a difficulty ladder that doubles as augmentation, with
+  **apo–apo being the deployment condition**.
+* **This is the primary tolerance signal, demoting ensemble-σ to a secondary source.** An apo–apo
+  pair in a crystal pose has clashes and gaps the holo pair does not, and the label still says *real
+  interface*. That is task-coupled supervision for "how much mismatch is tolerable here", tied to the
+  actual decision rather than to a proxy for flexibility.
+* **Mandatory QC:** report the contact-retention distribution for every substituted pair, never
+  assume it. Where a global CA superposition misplaces the interface (large domain motion),
+  fall back to interface-local alignment; retention is what detects this.
+
 **D8-13 — The Phase-7 ligand surface is carried as an A/B variable inside Phase 8, not re-tested as
 a separate phase.** Phase 7's primary verdict (a ligand surface is not a capacity fix) is **not**
 confounded by holo-only training: that gate was *train-set* retrieval measured on holo data the model
@@ -252,11 +312,12 @@ instead of a whole re-run of Phase 7.
 
 | stage | metric | gate |
 |---|---|---|
-| 1 | **recall**: does the true interface survive the atom-level screen? | must not regress vs the Phase-5/6C encoder |
+| 1 | **recall@top-1% of a 40k-entry DB** — the shortlist Stage 2 can afford | must not regress vs the Phase-5/6C encoder |
 | 2 | pose accuracy (DockQ / interface-RMSD vs native), **reported separately for holo and apo inputs** | the holo→apo gap here is the north-star number for this stage |
 | 2 | pose quality → **P(complementary)**: AUC vs `comp=0` pairs (both tiers, reported separately) | must beat a contact-count / size heuristic |
-| 3 | **`bio` vs `crystal` AUC at low FPR, conditioned on `comp=1`**, BSA-stratified | must beat the **BSA-only baseline** (D8-7) |
-| end-to-end | screening enrichment on a held-out benchmark | — |
+| 3 | **`bio` vs `crystal`, conditioned on `comp=1`**: enrichment@0.1% / @1%, precision@k, BSA-stratified (AUC reported but not the headline, D8-18) | must beat **BSA-only** (D8-7) **and** be situated against a published classifier (D8-17), on the curated held-out benchmark (D8-16) |
+| σ (Stage D) | correlation with B-factors / ensemble RMSF / pLDDT | D8-19 — no adaptive-tolerance claim without it |
+| end-to-end | screening enrichment@0.1%/1% on the curated held-out benchmark | — |
 
 Reporting only the end-to-end number would hide which stage fails. Chance lines, shuffled controls
 and per-item spread are reported throughout, per `ml-research-guardrails`.
@@ -286,27 +347,58 @@ report:
    what the residual (mutants, designed and artificial constructs) looks like.
 
 > **PAUSE HERE.** Stage A0 produces a recommendation, not a decision. The user chooses the method and
-> the holo:apo ratio (D8-12) before any of Stages A1–E is implemented. Estimated Stage-A0 cost
-> ~CHF 5; the full generation run that follows is ~CHF 150–560 depending on the choice, which is why
+> the holo:apo ratio (D8-12) before the **apo generation run** and Stages C–E. Estimated Stage-A0
+> cost ~CHF 5; the generation run that follows is ~CHF 150–560 depending on the choice, which is why
 > it is not made unilaterally.
 
-**Stage A — diagnostics (cheap, and either can invalidate the plan). Do these after A0.**
+### Critical path — A0 does NOT block the diagnostics or the mining
+
+Stages A1–A4 use only data we already hold (holo, plus the 284 PPI + 298 P–L apo models), and
+Stage B is pure PDB parsing. **None of them depends on A0's outcome**, so serialising them behind the
+pause would waste days for nothing:
+
+```
+A0  benchmark prediction methods ┐
+A1  sidechain sensitivity        │
+A2  cryptic pockets              ├─ ALL IN PARALLEL ─→ PAUSE (user decides D8-12)
+A3  rigid pose baseline          │                          │
+A4  signal-existence probe       │                          ↓
+B   label mining                 ┘                   apo generation ─→ C ─→ D ─→ E
+```
+
+By the time the method decision is made we will already know whether the encoder is sidechain-blind,
+whether pockets survive in apo, what rigid pose accuracy looks like, and whether any bio-vs-crystal
+signal exists at all.
+
+**Stage A — diagnostics (cheap; several can invalidate the plan). Run in parallel with A0.**
 * **A1 — sidechain sensitivity.** Is the current encoder modelling flexibility, or *ignoring
   sidechains*? Use FASPR repacks: how much do embeddings and PPI retrieval change under sidechain
   scrambling vs the true apo? Correlate per-atom embedding sensitivity with B-factor/pLDDT.
   *Why it matters:* if the encoder is backbone-reading, its atom×atom matrix cannot support pose
   prediction, and the bio-vs-crystal distinction — which lives in fine surface complementarity —
   is unreachable. **This gates everything downstream.** ~CHF 2.
+  *Contingency if A1 fails* — this is no longer fatal, because **D8-14 supplies the remedy**: if the
+  encoder is robust *by discarding* sidechains, training on apo–apo pairs whose label demands
+  discrimination **despite** sidechain differences forces it to model conformational variation rather
+  than ignore it. A1 failing therefore promotes the apo-substituted corpus from augmentation to
+  prerequisite, and Stage 1 is retrained before Stages C–D rather than the plan being abandoned.
 * **A2 — cryptic-pocket probe.** On the 298 AF3-apo models already built, compare pocket
   volume/openness at the known ligand site vs holo. *Why:* for P–L, apo→holo is often
   **backbone-scale** (closed/cryptic pockets), which no amount of per-atom sidechain tolerance
   recovers. This bounds what any model can achieve from apo input. ~CHF 1.
 * **A3 — Stage-2 rigid baseline.** RANSAC/ICP on the existing Stage-1 scores; pose accuracy on holo
-  and apo. Zero training cost, establishes the starting point. ~CHF 2.
+  and apo. Zero training cost, establishes the starting point. **Also measures seconds-per-pair**,
+  which feeds the deployment-compute fork of §6.5. ~CHF 2.
+* **A4 — signal-existence probe.** On a few hundred mined interfaces, compute simple aggregates from
+  the *existing* Stage-1 embeddings (score distribution, contact count, coherence) and fit a
+  **logistic regression** against the BSA-only baseline. *Why:* if a linear model on current
+  embeddings cannot beat interface area, the funnel's premise is in doubt — and learning that here
+  costs ~CHF 1 instead of discovering it after Stage C. Not a gate to pass, a warning to heed. ~CHF 1.
 
 **Stage B — label mining.** ASU-only crystal contacts + biological assemblies (PPI) and
-BioLiP-derived P–L classes; BSA-matched; cluster-clean splits on sequence and scaffold; the
-BSA-only baseline computed. *Gate:* ≥5k `bio=1` and ≥5k BSA-matched `comp=1,bio=0` interfaces
+BioLiP-derived P–L classes; BSA-matched; **the ONE global interface-level split of D8-15 defined
+here and frozen**; the curated held-out benchmark of D8-16 set aside untouched; BSA-only (D8-7) and
+the literature baseline (D8-17) computed. *Gate:* ≥5k `bio=1` and ≥5k BSA-matched `comp=1,bio=0` interfaces
 surviving clustering, or the scheme is reconsidered.
 
 **Stage C — Stage 3 scorer on rigid poses.** Train the pose-level classifier on Stage-A3 poses, with
@@ -317,9 +409,51 @@ conservation aggregates (D8-5), trained on `comp=1` only. *Gate:* beats the BSA-
 scoring improves apo pose accuracy and apo `bio`-vs-`crystal` discrimination over the rigid/point-embedding
 baseline, at ≥2 seeds.
 
-**Stage E — the conservation ablation (D8-5b)** and a deployment dry-run: a known glue system
+**Stage E — the conservation ablation (D8-5b)**, the σ-validity check (D8-19), and a deployment
+dry-run: a known glue system
 (6H0F: CRBN+pomalidomide → IKZF1 ZF2; composite neosurface **already built** in Phase 7) queried
 against the TED domainome. Reality check on the real operating point, not a training target.
+
+## 6.5 Open forks — decisions NOT yet made, each owned by the stage that needs it
+
+These are named so they cannot be resolved silently, which is the failure mode that produced D8-12
+and D8-14.
+
+**F1 — "protein complex" as a partner type.** The north star (§0) explicitly allows a partner to be a
+*protein complex*, and nothing in this design addresses it. Is a multi-chain partner one graph with
+several chains, or a composed representation? Affects Stage 1's input contract.
+*Owner:* must be closed before the corpus is built, since it changes what a "chain pair" is.
+
+**F2 — Stage 3's input representation.** "Consumes the embedding of the predicted pose" is not a
+spec. Candidates: (a) an interface-graph GNN over the aligned atoms of both partners with cross
+edges; (b) aggregate interface descriptors; (c) both. Whatever is chosen must **not** be handed
+BSA-equivalent features naively, or D8-7's control becomes untestable.
+*Owner:* Stage C. Informed by A4 — if simple aggregates already carry the signal, (b) may suffice.
+
+**F3 — Stage 2's compute budget at deployment scale.** Unbudgeted, and it can invalidate the
+architecture independently of accuracy: at 1 s/pair a 40k-domain screen is ~11 h per target, at
+60 s/pair it is ~27 days. **A3 measures seconds-per-pair**, which closes this fork cheaply and early.
+If Stage 2 is too slow, either the Stage-1 shortlist tightens (raising the recall bar of D8-18) or
+Stage 2 needs a cheaper formulation.
+
+**F4 — What counts as an acceptable AFDB sequence match** (exact, ≥95% identity over the observed
+range, truncation policy for constructs and tags). *Owner:* Stage A0, item 4.
+
+### 6.6 Cost envelope
+
+| item | ≈ CHF |
+|---|---|
+| A0 benchmark | 5 |
+| A1–A4 diagnostics + probe | 6 |
+| B label mining | 5 |
+| **apo generation run** (decision-dependent) | **150–560** |
+| C Stage-3 scorer, ≥2 seeds | 15 |
+| D tolerance + differentiable Stage 2, ≥2 seeds | 30 |
+| E ablation + dry-run | 10 |
+| | **≈ 220–630** |
+
+The generation run dominates and is the only item requiring a decision before it is spent, which is
+what the A0 pause exists for.
 
 ## 7. Risks
 
