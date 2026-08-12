@@ -414,6 +414,9 @@ dry-run: a known glue system
 (6H0F: CRBN+pomalidomide → IKZF1 ZF2; composite neosurface **already built** in Phase 7) queried
 against the TED domainome. Reality check on the real operating point, not a training target.
 
+> **Stage A has its own implementation plan: `docs/24-phase8A-plan.md`** (test sets, methods,
+> metrics, job shapes, autonomy boundary, fallbacks). Results land in `docs/25-phase8A-results.md`.
+
 ## 6.5 Open forks — decisions NOT yet made, each owned by the stage that needs it
 
 These are named so they cannot be resolved silently, which is the failure mode that produced D8-12
