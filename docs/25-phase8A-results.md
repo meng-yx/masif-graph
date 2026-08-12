@@ -191,17 +191,117 @@ samples more broadly" is suggestive only.
 Inference cost is comparable (~74 s vs ~60–70 s per chain), and both numbers exclude MSA *search*.
 The MSA-free arm's real advantage is that it needs no search at all.
 
-## 6. A1.2 — repack sensitivity
+## 6. A1.2 — the conformational test: a repack is **91%** of the AF3 perturbation
 
-*(filled in below)*
+A1 perturbed sidechain *identity*. An apo structure keeps identity and moves only the rotamer, so
+this is the measurement that connects A1 to the north star. 99/100 FASPR fixed-backbone repacks
+succeeded; 90 complexes have holo + AF3 + repack.
 
-## 7. A4 — bio vs crystal signal
+| quantity | seed 0 | seed 1 |
+|---|---|---|
+| relative displacement, FASPR repack | 0.322 | 0.206 |
+| relative displacement, AF3 | 0.353 | 0.224 |
+| **ratio repack / AF3** | **0.914** | **0.917** |
 
-*(filled in below)*
+**A fixed-backbone sidechain repack moves the embedding ~91% as far as a full AF3 re-prediction**,
+in both seeds. Almost everything the encoder feels when handed an apo structure is **sidechain
+rearrangement**, not backbone. Together with A1 (the encoder reads sidechains) and A2 (apo pocket
+loss is sidechain-mediated), three independent measurements land on the same lever.
 
-## 8. Recommendation for D8-12 (the user decides)
+Retrieval with the repack substituted into the AF3 slot (n=90, DB=180, chance top-5 0.028):
 
-*(filled in below)*
+| cell | s0 | s1 |
+|---|---|---|
+| HH holo–holo | 0.733 | 0.694 |
+| **AA repack–repack** | **0.700** | **0.706** |
+| shuffled control | 0.033 | 0.033 |
+
+The encoder is robust to repacking as it is to AF3 (−0.033 / +0.012, inside seed spread).
+
+### 6.1 Correction: the "implicit σ" from A1 does not survive
+
+Under `sc_all` (feature destruction) Spearman(displacement, `flex_depth`) was **+0.381 / +0.599**.
+Under an actual repack it is **−0.18 / −0.18** — **the sign flips**.
+
+So the encoder does *not* move more where sidechains are more rotatable when the perturbation is a
+real conformational change; if anything it moves less. One reading is that it has learned to be
+*insensitive* at flexible positions — good for robustness, bad for a σ head. Either way **D8-9
+cannot assume the σ signal is already present**; the A1 correlation was an artefact of the
+perturbation type, and calling it an implicit σ before this test was premature.
+
+## 7. A4 — is bio vs crystal separable, and by what?
+
+393/400 mined entries, **1,755 interfaces (1,460 bio / 295 crystal)**, labelled by the
+**identity-operator** rule: a pair is biological only if both chains receive the IDENTITY transform
+inside one `BIOMOLECULE`. Chain-list co-occurrence alone would mislabel "chain A plus a symmetry copy
+of A" as a biological A–B pair — precisely the case Stage 3 must get right.
+
+BSA median: **bio 1,828 Å², crystal 615 Å².**
+
+| arm | AUROC | AP(crystal) |
+|---|---|---|
+| **BSA only** | **0.827** | **0.474** |
+| + contact count + chain sizes | 0.857 | 0.546 |
+| BSA only, shuffled labels | 0.526 | 0.177 |
+| structural, shuffled labels | 0.512 | 0.173 |
+
+Grouped 5-fold CV by PDB entry (interfaces from one entry share chains). Shuffled controls collapse
+to chance with AP at prevalence (0.168), so the folds and the metric are sound.
+
+**This is the D8-7 hard control, now quantified: Stage 3 must beat AUROC 0.827 / AP(crystal) 0.474.**
+Interface area alone is a strong predictor of "biological", which is exactly why it needed measuring
+before anything is built on top of it. Adding trivial geometry buys +0.030 AUROC.
+
+## 8. Recommendation for D8-12 — **the decision is yours**
+
+Stage A produces evidence; the choice of method and holo:apo ratio is yours. What the evidence says:
+
+**1. AFDB coverage is real but heterogeneous.** 68.8% of training complexes have both sides usable —
+but only **13.6% of chains are exact sequence matches**. 18.2% are *subsequences* (the crystal
+construct is a domain of a larger AFDB protein, so the model carries extra domains that must be
+trimmed) and 42.6% are merely ≥95% identical (point mutants, tags). Option A therefore buys coverage
+at the cost of a **heterogeneous corpus** with three different kinds of sequence relationship, plus a
+local-prediction fallback for the remaining 31%.
+
+**2. Local prediction is cheaper than it looked, and uniform.** Chai-1 on the shared MSA is
+statistically indistinguishable from AF3 (TM Δ −0.001, p=0.38). **MSA-free** chai costs only
+TM −0.012 / +0.59 Å — and needs **no MSA search at all**, which is the dominant real cost. At
+~74 s/chain, predicting **every** chain in the corpus (9,886 chain instances × 5 conformers) is
+roughly **200 GPU-hours**. That yields one provenance, five conformers per chain, and no
+construct-matching ambiguity.
+
+**3. AF3 five samples are free.** ~60–70 s/chain at `NSAMP=5`, identical to `NSAMP=1`, because MSA
+and trunk dominate. Wherever we already hold MSAs (~880 chains), five conformers cost nothing extra.
+
+**4. A repack is a 91%-strength apo proxy at zero GPU cost.** This is the finding the plan did not
+anticipate. If what the encoder feels from an apo structure is 91% sidechain rearrangement (§6), then
+FASPR repacking gives most of the apo signal for ~1 CPU-minute per complex — usable as a **high-volume
+augmentation across the entire corpus**, orthogonal to and much cheaper than a predicted-structure arm.
+
+**5. Conformational diversity will be limited whatever you choose.** Our corpus is almost entirely
+high-confidence (pLDDT p01 = 77.5, 1 of 883 chains below 70), and AF3's five-sample spread is a
+median 0.220 Å. Resampling will not manufacture large conformational variety here.
+
+**My recommendation, for you to accept or reject:** a **hybrid** — FASPR repack as a cheap augmentation
+over the whole corpus (it captures 91% of the perturbation), plus **chai-1 MSA-free** for a genuine
+predicted-structure arm at ~200 GPU-h, in preference to AFDB. AFDB's 68.8% coverage is not worth the
+three-way construct heterogeneity when uniform local prediction is affordable and the accuracy gap to
+AF3 is TM 0.012. On the ratio: begin at **1:1 holo:apo** and treat the extra conformers as
+augmentation rather than as distinct training pairs, since the spread between them is small.
+
+### 8.1 The finding that should be decided before Stage B, not after
+
+**A3 says the funnel's Stage 2 cannot be built on the current Stage-1 scores.** Rigid pose prediction
+scores 0/269 in every conformer state and every checkpoint while the oracle scores 100%. This is not
+a compute problem (F3: ~6 core-hours per 40k screen) and not merely hub collapse (the Stage-B
+checkpoints are well distributed and still fail). It is that the chain-level `median_i max_j`
+objective never constrained *which* partner attains the max.
+
+Per §9 of the plan I am not acting on this unilaterally, because it reorders the phase. The options
+are: (a) add an atom-level correspondence loss to Stage 1 and re-derive Stage 2; (b) replace the
+RANSAC pose step with a learned pose module trained end-to-end (D8-10 already anticipates
+differentiability); or (c) skip explicit poses and score interfaces directly, which would collapse
+Stages 2 and 3 into one. **This is worth your decision alongside D8-12.**
 
 ## 9. What was NOT evaluated
 
