@@ -15,9 +15,10 @@ artefact of ignoring sidechains. Cryptic pockets **mostly do not close** in AF3 
 median buried-fraction ratio is 1.001, and the 20% that do degrade do so through **sidechains**,
 which a repack step can recover. But **Stage 2 as designed cannot be built on the current Stage-1
 scores** (A3): rigid pose prediction succeeds on **0 of 269** complexes in every conformer state and
-every checkpoint, while the same fitter given true correspondences succeeds on **100%**. The
-atom-level scores are not spatially discriminative — a direct consequence of training on a
-chain-level `median-of-max` objective that never penalised a bad argmax. Fork **F3 is settled
+every checkpoint, while the same fitter given true correspondences succeeds on **100%** — so the
+failure is in Stage 1's atom-pair proposals, not in the pose fitter. Its larger component is that the
+atom-level objective only ever queried *true interface atoms*, so the encoder was never trained to
+tell an interface atom from a non-interface one (§4.2). Fork **F3 is settled
 favourably** (≈0.6 s/pair → ~6 core-hours per 40k screen), so the obstacle is the objective, not the
 compute. A fourth measurement (A4) says the same embeddings add **nothing** over interface area for
 telling a biological interface from a crystal contact. For D8-12, **AFDB covers 68.8% of training
@@ -106,12 +107,50 @@ Pre-registered success: `fnat ≥ 0.3` **and** `iRMSD ≤ 4 Å`.
 The oracle succeeds in all four runs, so **the fitter is sound and the failure belongs to the
 correspondences**.
 
-**Mechanism, with a correction.** An 8-complex pilot on a Stage-A checkpoint suggested hub collapse.
-At full scale that is only half the story: Stage-B checkpoints are **not** hub-collapsed — 370
-distinct argmax partners and 211–277 mutual-best pairs, versus 77 and 2–3 for Stage A — and still
-score 0%. Plentiful, well-distributed correspondences are **not sufficient**. The atom-level scores
-are simply not spatially discriminative, which follows from a chain-level `median_i max_j` objective
-that is indifferent to *which* partner attains the max.
+### 4.1 What exactly failed: **Stage 1**, not the pose fitter
+
+The test is: score every surface atom of chain 1 against every surface atom of chain 2 with the
+learned form `z_i^T T z_j`; take the top-1000 pairs as *predicted interacting atom pairs*; move
+chain 2 away with a random rigid transform; ask RANSAC-Kabsch for the transform that best
+superimposes those predicted partners; then measure how close chain 2 lands to its true position.
+
+Swapping *only* the predicted pairs for the true contact pairs (the ORACLE arm) takes success from
+**0% to 100%**. Everything downstream of the pairs is therefore correct, and **the failure is in
+Stage 1's atom-pair proposals** — it is a correspondence failure, not a pose-fitting failure.
+
+### 4.2 Mechanism — correcting two earlier claims
+
+**Claim 1 (wrong), now withdrawn:** I wrote that this "follows from a chain-level `median_i max_j`
+objective that never penalised a bad argmax". That is **false**. Atom-level supervision was present
+in *both* stages: `p4.objective.info_nce_complex` is an InfoNCE that ranks the true partner atom
+against all of the partner chain's atoms, and Stage-B retrieval keeps it as an auxiliary term at
+`--w-atom 0.5`.
+
+**Claim 2 (half-right):** hub collapse is a Stage-A pathology only. Stage-B has 342–370 distinct
+argmax partners and 210–277 mutual-best pairs and still scores 0%.
+
+**What the objective actually omits.** In `info_nce_complex` the anchor is `z1[pos[:, 0]]` — the
+query set is **always a true contacting atom**. The model was trained on *"given that this atom is at
+the interface, which partner atom does it touch?"* and **never** on *"is this atom at an interface at
+all?"*. Global top-1000 over all pairs mixes the trained axis with the untrained one.
+
+Gating separates them (n=60, oracle gate on **which atoms are interface**, never on which pairs;
+labelled per docs/10 §23 and **not** a deployment number):
+
+| correspondence set | Stage-A precision | Stage-B precision | success A / B |
+|---|---|---|---|
+| global top-1000 (deployment condition) | 0.0020 (7.7× chance) | 0.0020 (8.2×) | 0.000 / 0.000 |
+| query gated to true interface atoms | 0.0140 (52×) | 0.0140 (49×) | 0.000 / 0.000 |
+| **both sides gated to true interface atoms** | 0.0365 (146×) | 0.0470 (190×) | **0.100 / 0.100** |
+
+So the failure has **two** components, and the larger one is fixable by construction:
+
+1. **Interface localisation (untrained).** Restricting queries to true interface atoms multiplies
+   precision by **7×**; gating both sides by **18–24×**. Most of the deployment failure is the model
+   scoring non-interface atoms as highly as interface atoms — an axis it was never asked to learn.
+2. **Within-interface matching (trained, but weak).** Even with a perfect interface oracle on both
+   sides, precision is only 3.7–4.7% and pose success 10%. The trained axis works, but not nearly
+   well enough to drive a rigid fit.
 
 **Fork F3 is settled, favourably**: **0.57–0.64 s per pair** with embeddings precomputed →
 **~6–7 core-hours per 40k-partner screen**. Stage 2 is affordable; on the current Stage-1 scores it
@@ -352,10 +391,13 @@ checkpoints are well distributed and still fail). It is that the chain-level `me
 objective never constrained *which* partner attains the max.
 
 Per §9 of the plan I am not acting on this unilaterally, because it reorders the phase. The options
-are: (a) add an atom-level correspondence loss to Stage 1 and re-derive Stage 2; (b) replace the
-RANSAC pose step with a learned pose module trained end-to-end (D8-10 already anticipates
-differentiability); or (c) skip explicit poses and score interfaces directly, which would collapse
-Stages 2 and 3 into one. **This is worth your decision alongside D8-12.**
+are: (a) add the **missing axis** to Stage 1 — an interface-vs-non-interface term, since an atom-level
+correspondence loss already exists and the gap is that it only ever queries true interface atoms
+(§4.2); (b) replace the RANSAC pose step with a learned pose module trained end-to-end (D8-10 already
+anticipates differentiability); or (c) skip explicit poses and score interfaces directly, collapsing
+Stages 2 and 3 into one. §4.2 makes (a) the cheapest first move — it is a loss change, not an
+architecture change — but even a perfect interface oracle only reaches 10% pose success, so (a) alone
+will not be sufficient. **This is worth your decision alongside D8-12.**
 
 ## 9. Cost
 

@@ -117,6 +117,22 @@ def pose_one(rec, cell, z, T, args, rng_seed, corr_mode="learned"):
         r = np.random.default_rng(rng_seed + 7)
         ii = r.integers(0, S.shape[0], size=len(ii))
         jj = r.integers(0, S.shape[1], size=len(jj))
+    elif corr_mode in ("iface_q", "iface_both"):
+        # DIAGNOSTIC with an ORACLE GATE ON WHICH ATOMS ARE INTERFACE (never on which pairs).
+        # Stage-A/B atom-level InfoNCE queries ONLY true contacting atoms (objective.info_nce_complex:
+        # the anchor is z1[pos[:,0]]), so the model was never trained to score an interface atom above
+        # a non-interface one. Global top-k mixes that untrained axis with the trained matching axis;
+        # gating separates them. Labelled as oracle-gated per docs/10 s23 — NOT a deployment number.
+        q = np.unique(nat[:, 0])
+        Sq = S[torch.as_tensor(q, dtype=torch.long)]
+        if corr_mode == "iface_both":
+            c = np.unique(nat[:, 1])
+            Sq = Sq[:, torch.as_tensor(c, dtype=torch.long)]
+        k = min(n_take, Sq.numel())
+        fl = torch.topk(Sq.flatten(), k).indices.cpu().numpy()
+        a, b = np.unravel_index(fl, tuple(Sq.shape))
+        ii = q[a]
+        jj = (np.unique(nat[:, 1])[b] if corr_mode == "iface_both" else b)
     elif corr_mode == "oracle":                                 # POSITIVE control: true contacts
         sel = nat if len(nat) <= n_take else nat[
             np.random.default_rng(rng_seed).choice(len(nat), n_take, replace=False)]
@@ -193,7 +209,7 @@ def run(args):
     print(f"encoded {len(raw)} chain-states in {encode_s:.1f}s "
           f"({encode_s/max(len(raw),1):.3f}s per chain-state)", flush=True)
 
-    rows, ctrl, orac, mutu = [], [], [], []
+    rows, ctrl, orac, mutu, ifq, ifb = [], [], [], [], [], []
     for i, r in enumerate(recs):
         for cell in CELLS:
             o = pose_one(r, cell, z, Tm, args, rng_seed=args.seed)
@@ -202,6 +218,10 @@ def run(args):
         o = pose_one(r, "HH", z, Tm, args, rng_seed=args.seed, corr_mode="mutual")
         if o:
             mutu.append(o)
+        for m, acc in (("iface_q", ifq), ("iface_both", ifb)):
+            o = pose_one(r, "HH", z, Tm, args, rng_seed=args.seed, corr_mode=m)
+            if o:
+                acc.append(o)
         if args.control:
             o = pose_one(r, "HH", z, Tm, args, rng_seed=args.seed, corr_mode="random")
             if o:
@@ -241,7 +261,9 @@ def run(args):
         }
     for name, arm in (("control_random_correspondences_HH", ctrl),
                       ("control_oracle_correspondences_HH", orac),
-                      ("arm_mutual_best_HH", mutu)):
+                      ("arm_mutual_best_HH", mutu),
+                      ("diag_iface_gated_query_HH", ifq),
+                      ("diag_iface_gated_both_HH", ifb)):
         if arm:
             out[name] = {
                 "n": len(arm), "success_rate": float(np.mean([x["success"] for x in arm])),
@@ -275,7 +297,9 @@ def run(args):
                   f"{c['predict_seconds']['median']:8.2f}")
     for lbl, name in (("random (must fail)", "control_random_correspondences_HH"),
                       ("ORACLE (must succeed)", "control_oracle_correspondences_HH"),
-                      ("mutual-best arm", "arm_mutual_best_HH")):
+                      ("mutual-best arm", "arm_mutual_best_HH"),
+                      ("iface-gated QUERY", "diag_iface_gated_query_HH"),
+                      ("iface-gated BOTH", "diag_iface_gated_both_HH")):
         k = out.get(name)
         if k:
             print(f"-- {lbl:22s}: success {k['success_rate']:.3f}  "
