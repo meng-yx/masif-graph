@@ -29,7 +29,7 @@ apo structure. Deployment mode is **retrieval/screening**; the training signal i
 the LAST deployment target (too little data, and Phase 7 showed it is a third relation, not
 PPI ∘ P–L). Full contract: `docs/23-phase8-design.md`.
 
-**Status: Phases 1–7 complete; Phase 8 designed, not started.**
+**Status: Phases 1–7 complete; Phase 8 Stage A COMPLETE; Stage R (Stage-1 redesign) is the current work.**
 - Phase 5 **met the robustness gate** — the from-scratch invariant encoder beats frozen MaSIF on
   AF3-apo retrieval and is conformation-robust. Phase 7 extended that to the ligand axis.
 - The **atom/chem-graph thesis of §2 in `docs/00` is NOT earned** — five independent nulls
@@ -69,6 +69,21 @@ Phase-5 eval 301 holo / 284 apo. So the reported holo→apo robustness is **zero
 Phase 8 changes this (D8-12) — the holo:apo ratio and the prediction method are **undecided pending
 the Stage-A0 benchmark and a user decision**. Never report a training result without saying which
 states were in the training set.
+
+## Phase-8 Stage A result and the Stage-R pivot (2026-08-12)
+Stage A (`docs/25-phase8A-results.md`) cleared two risks and broke one:
+- **A1**: the encoder is **not** sidechain-blind (isolating sidechain atoms costs 70% of the graph's
+  information), so Phase-5 robustness is real. **A2**: apo pockets mostly do not close (ratio 1.001;
+  20% degrade, sidechain-mediated). **A0**: chai-1 on a shared MSA ≈ AF3 (paired p=0.38); AF3's 5
+  diffusion samples cost the same as 1; **a FASPR repack reproduces 91% of the AF3 perturbation**.
+- **A3 broke the funnel**: rigid pose from Stage-1 scores succeeds **0/269** while the same fitter
+  with true correspondences succeeds 100%. Given a true interface atom as query, the top-1 predicted
+  partner is a median **19.4 Å** away. **A4**: the same embeddings add nothing over interface area
+  (BSA-only AUROC 0.827 is the bar Stage 3 must beat).
+- **Stage R** (`docs/26-phase8R-design.md`) is inserted before Stage B: invariant global context to
+  break a ~15-20 Å receptive field, distance-decayed soft targets + a no-contact dustbin, and an
+  inter-chain **distogram** replacing real-space pose prediction. Gate: **top-1 spatial error < 5 Å**
+  with chain retrieval preserved. D8-12 is resolved (repack + chai-1 MSA-free; AFDB rejected).
 
 ## The Phase-8 gate (what the current work is deciding)
 A **three-stage funnel** (`docs/23-phase8-design.md`, reconciling `docs/11`):

@@ -1,4 +1,21 @@
-# Phase 8 — design contract: apo-native evaluation of biomolecular interactions
+# Phase 8 — design contract
+
+> **REVISED 2026-08-12 after Stage A.** Stage A found that Stage 1's atom-pair scores cannot drive
+> Stage 2 (0/269 pose success; the top-1 predicted partner is a median 19.4 Å from the true one).
+> A new **Stage R** is inserted between A and B to redesign Stage 1 and replace Stage 2 —
+> see **`docs/26-phase8R-design.md`**, which supersedes parts of this contract:
+>
+> * **D8-2** — Stage 2 is an inter-chain **distogram + geometric-consistency scalar**, not a pose
+>   predictor. The explicit real-space pose is **dropped** (recoverable on demand for top hits).
+> * **D8-9** — σ is the per-pair predicted distance spread. A1.2 showed the current encoder has **no**
+>   implicit σ (the `flex_depth` correlation flips sign under a real repack), so it must be learned.
+> * **D8-10** — differentiability is satisfied by construction; no separate requirement.
+> * **D8-12** — **RESOLVED**: FASPR repack over the whole corpus (91% of the AF3 perturbation, zero
+>   GPU) + **chai-1 MSA-free** for the predicted arm. **AFDB rejected** — only 12.6% of training
+>   complexes match exactly, and the ≥95%-identity class cannot carry positives cleanly.
+> * **new** — altLoc: keep conformer `A` (21% of chains affected). Incomplete sidechains: **do not
+>   repair holo** (it would invent contacts at the atoms we train on); flag and exclude.
+: apo-native evaluation of biomolecular interactions
 
 > Design-ahead-of-code. Supersedes the partial north-star statements in `docs/00` §1 and `docs/16` §6,
 > and **reconciles with `docs/11`** (Phase-4 Stage-C), which specified a three-stage funnel before
