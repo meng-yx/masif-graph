@@ -29,7 +29,7 @@ apo structure. Deployment mode is **retrieval/screening**; the training signal i
 the LAST deployment target (too little data, and Phase 7 showed it is a third relation, not
 PPI ∘ P–L). Full contract: `docs/23-phase8-design.md`.
 
-**Status: Phases 1–7 complete; Phase 8 Stage A COMPLETE; Stage R (Stage-1 redesign) is the current work.**
+**Status: Phases 1–7 complete; Phase 8 Stage A COMPLETE; Stage R COMPLETE — its gate FAILED.**
 - Phase 5 **met the robustness gate** — the from-scratch invariant encoder beats frozen MaSIF on
   AF3-apo retrieval and is conformation-robust. Phase 7 extended that to the ligand axis.
 - The **atom/chem-graph thesis of §2 in `docs/00` is NOT earned** — five independent nulls
@@ -80,10 +80,14 @@ Stage A (`docs/25-phase8A-results.md`) cleared two risks and broke one:
   with true correspondences succeeds 100%. Given a true interface atom as query, the top-1 predicted
   partner is a median **19.4 Å** away. **A4**: the same embeddings add nothing over interface area
   (BSA-only AUROC 0.827 is the bar Stage 3 must beat).
-- **Stage R** (`docs/26-phase8R-design.md`) is inserted before Stage B: invariant global context to
-  break a ~15-20 Å receptive field, distance-decayed soft targets + a no-contact dustbin, and an
-  inter-chain **distogram** replacing real-space pose prediction. Gate: **top-1 spatial error < 5 Å**
-  with chain retrieval preserved. D8-12 is resolved (repack + chai-1 MSA-free; AFDB rejected).
+- **Stage R FAILED its gate** (`docs/27-phase8R-results.md`): spatial 17–20 Å vs <5 Å, and chain
+  retrieval collapsed 0.644 → 0.024. The decisive control: a **random atom among the partner's true
+  interface atoms** scores 19.99 Å / 0.071-within-5 Å and the Phase-6C/7 encoder scores 19.4 Å /
+  **0.071** — identical. The encoder finds the interface and is **random inside it**. Ablations are
+  flat, it cannot overfit 20 complexes in 60 epochs, and the score matrix is near-uniform
+  (effective 1,197 of 1,265). **Keep the Phase-6C/7 encoder; adopt no Stage-R checkpoint.**
+  The live option is the pre-registered fallback: **collapse Stages 2 and 3 and score interfaces
+  directly**. D8-12 is resolved (repack + chai-1 MSA-free; AFDB rejected).
 
 ## The Phase-8 gate (what the current work is deciding)
 A **three-stage funnel** (`docs/23-phase8-design.md`, reconciling `docs/11`):

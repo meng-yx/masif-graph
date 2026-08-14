@@ -366,3 +366,34 @@ carries ~4× less bias. Vertex coordinates are in the reference precomputation, 
 
 **Conclusion unchanged:** the learned arm is at 21–23 Å against a 1.9 Å floor. But the harness is
 stricter than intended and must be fixed before iRMSD is used to judge an improved Stage 1.
+
+---
+
+## 2026-08-14 — Stage R BUILT AND RUN; the R4 gate FAILED
+
+Full results: `docs/27-phase8R-results.md`. Summary:
+
+**Built**: R1 invariant global context (`p8/context.py`, rotation gate exact 0.000e+00, end-to-end
+2.4e-06), R2 soft-target InfoNCE + no-contact dustbin (`p8/objective_r.py`), R3 distogram head
+(`p8/distogram.py`), the joint trainer with holo/repack conformer augmentation (`p8/train_r.py`),
+and the pre-registered gate (`p8/eval_r.py`). Corpus: 4,428 repacks, 4,313 rp graphs.
+
+**Gate FAILED on both criteria.** Spatial 17-20 A vs <5 A; chain retrieval collapsed 0.644 ->
+0.024-0.032. No Stage-R checkpoint should be adopted.
+
+**Two things caught by controls I had not run before:**
+1. A **random atom among the partner's true interface atoms** scores 19.99 A / 0.071 within-5A. The
+   Phase-6C/7 encoder scores 19.4 A / **0.071**. They are the same. The encoder finds the interface
+   and is random inside it — which corrects docs/25 §4.3.
+2. The score matrix is **near-uniform** (effective 1,197 of 1,265 candidates; softmax entropy 7.088
+   vs log(1265) = 7.14). That single pathology explains both the matching failure and the retrieval
+   collapse.
+
+**Ablations flat** (R1/R2a/R3 all within seed spread), **overfit probe cannot fit 20 complexes in 60
+epochs** (loss pinned at the uniform value), **swapping the bilinear scorer for the MLP head is
+worse**. So: not the loss, not the context, not the scorer, not data volume, not generalisation.
+
+**Recommendation**: take the pre-registered fallback — collapse Stages 2 and 3, score interfaces
+directly, keep the Phase-6C/7 encoder. Awaiting the user's decision.
+
+Spend this stage ~CHF 20.
