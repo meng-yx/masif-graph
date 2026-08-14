@@ -58,7 +58,7 @@ def load_chain_graph(npz_path, device="cpu"):
     va_feat = torch.cat([rbf(va_dist, VA_RBF_N, VA_RBF_DMAX), va_cos[:, None]], dim=1) \
         if va_v.shape[0] > 0 else torch.zeros(0, D_VA, device=device)
 
-    return {
+    g = {
         "atom_feat": t(z["atom_feat"]),
         "vert_feat": t(z["vert_feat"]),
         "aa_edge": aa_edge, "aa_feat": aa_feat,
@@ -71,6 +71,14 @@ def load_chain_graph(npz_path, device="cpu"):
         "desc_flipped": t(z["desc_flipped"]),
         "coord": t(z["coord"]),
     }
+    # Stage R / R1: append rotation-invariant global context (docs/26 §1). Opt-in by env var so the
+    # whole existing call graph (Rec, retrieval_bench, the trainers) picks it up without threading a
+    # flag through every signature — the same mechanism as MASIF_NO_AA above. A train/eval mismatch
+    # cannot pass silently: the atom-feature width changes 26 -> 33 and the first matmul fails loudly.
+    if os.environ.get("MASIF_GLOBAL_CTX"):
+        from masif_graph.p8.context import attach_context
+        g = attach_context(g)
+    return g
 
 
 def hetero_to_dict(g, device="cpu"):
