@@ -333,3 +333,36 @@ Total ≈ CHF 12 (Jed ≈ 6, Kuma ≈ 6), no training, nothing irreversible.
 1. **D8-12** — apo-prediction method and holo:apo ratio. Recommendation in docs/25 §8.
 2. **The A3 consequence** — Stage 2 cannot be built on the current Stage-1 scores. Options in
    docs/25 §8.1. Not acted on unilaterally because it reorders the phase.
+
+---
+
+## 2026-08-12 — A3 harness bias found on user challenge
+
+The user pointed out that RANSAC-Kabsch on *atom centres* co-locates contacting atoms, which is
+physically impossible — MaSIF gets away with it on surface vertices because two contacting surfaces
+are ~1 Å apart, but atom centres are ~4 Å apart and must never overlap.
+
+**Measured, and they are right** (40 complexes):
+
+| quantity | value |
+|---|---|
+| true separation of "contacting" atom-centre pairs | median **3.79 Å** |
+| native inter-chain closest approach | 2.55 Å |
+| closest approach after the ORACLE Kabsch fit | **1.06 Å** (interpenetrated) |
+| ORACLE iRMSD vs true pose | **1.90 Å** ← a floor the harness imposes |
+
+So the oracle's 1.9 Å is the *bias*, not its accuracy, and the pre-registered 4 Å threshold really
+allowed only ~2.1 Å of correspondence-driven error.
+
+**Attempted fix failed and was reverted.** A global de-clash (slide the partner out along chain 1's
+interface normal until contact distance is restored) took the oracle from 1.9 → **10.3 Å** and
+success 1.000 → 0.125. The co-location bias is per-contact along each pair's own local normal, not a
+single global translation, so one shift wrecks a curved interface. Removed rather than shipped; the
+reason is recorded in the module docstring so it is not retried blind.
+
+**Correct fix, for when it matters:** fit at the VERTEX level. Contacts were defined by vertex
+proximity at 1.0 Å (`precompute`: `vertex_contacts(..., pos_cutoff=1.0)`), so vertex-level alignment
+carries ~4× less bias. Vertex coordinates are in the reference precomputation, not our npz.
+
+**Conclusion unchanged:** the learned arm is at 21–23 Å against a 1.9 Å floor. But the harness is
+stricter than intended and must be fixed before iRMSD is used to judge an improved Stage 1.

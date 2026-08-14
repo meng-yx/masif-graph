@@ -105,7 +105,27 @@ Pre-registered success: `fnat ≥ 0.3` **and** `iRMSD ≤ 4 Å`.
 | random correspondences | 0.000 | 0.000 | 26–28 Å | 0.000 |
 
 The oracle succeeds in all four runs, so **the fitter is sound and the failure belongs to the
-correspondences**.
+correspondences** — with one qualification, below.
+
+**Known bias in this harness (found after the fact, on user challenge).** Point-to-point Kabsch
+minimises `|T(c2[j]) − c1[i]|²`, so it drives *contacting atom centres together*. Real contacting
+atom centres are **3.79 Å apart** (measured median); only the surfaces nearly touch. MaSIF can fit
+this way because it fits surface **vertices**; on atom centres the fitted pose interpenetrates —
+closest approach **1.06 Å vs 2.55 Å native** — which costs a systematic **~1.9 Å iRMSD floor** before
+any correspondence error. The oracle's 1.9 Å is that floor, not its accuracy, and the 4 Å success
+threshold therefore allows only ~2.1 Å of correspondence-driven error.
+
+A global de-clash correction (slide the partner out along chain 1's interface normal until contact
+distance is restored) was tried and **made it worse** — oracle iRMSD 1.9 → 10.3 Å, success
+1.000 → 0.125 — because the bias is per-contact along each pair's own local normal, not one global
+translation; on a curved interface a single shift destroys the fit. It was reverted rather than
+shipped. The correct fix is to fit at the **vertex** level (contacts were defined by vertex proximity
+at 1.0 Å, so the bias there is ~4× smaller); vertex coordinates live in the reference precomputation
+rather than in our npz.
+
+**This does not change the A3 conclusion** — the learned arm sits at 21–23 Å against a 1.9 Å floor —
+but it does mean the harness is stricter than intended, and it must be fixed before iRMSD is used to
+judge an *improved* Stage 1.
 
 ### 4.1 What exactly failed: **Stage 1**, not the pose fitter
 

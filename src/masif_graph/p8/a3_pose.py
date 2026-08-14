@@ -22,6 +22,21 @@ deployment condition.
 Controls: a **random-correspondence arm** (same RANSAC, same counts, shuffled pairing) that must
 fail; correspondence precision against native contacts; the starting iRMSD after the random pose.
 
+KNOWN BIAS — read before interpreting iRMSD. Point-to-point Kabsch minimises |T(c2[j]) - c1[i]|^2,
+so it drives CONTACTING ATOM CENTRES together. Real contacting atom centres are ~3.8 A apart
+(measured median 3.79 A); only the *surfaces* nearly touch. MaSIF can fit this way because it fits
+surface VERTICES; on atom centres the fitted pose interpenetrates — closest approach 1.06 A against
+2.55 A native — costing a systematic **~1.9 A of iRMSD floor** before any correspondence error. So
+the 4 A success threshold really allows only ~2.1 A of correspondence-driven error.
+
+A global de-clash correction (slide the partner out along chain 1's interface normal until contact
+distance is restored) was tried and made things WORSE: oracle iRMSD 1.9 -> 10.3 A, success
+1.000 -> 0.125. The bias is per-contact along each pair's own local normal, not one global
+translation, so on a curved interface a single shift destroys the fit. The correct fix is to fit at
+the VERTEX level (contacts were defined by vertex proximity at 1.0 A, so the bias there is ~4x
+smaller); vertex coordinates live in the reference precomputation, not in our npz. Worth doing when
+Stage 1 is good enough for a 1.9 A floor to matter — at the measured 21-23 A it changes nothing.
+
 Success is pre-registered (docs/24 §5): **fnat >= 0.3 AND iRMSD <= 4 A**.
 
 Usage:
@@ -37,6 +52,7 @@ import time
 
 import numpy as np
 import torch
+from scipy.spatial import cKDTree
 
 from masif_graph.align.global_align import apply_T, kabsch_icp, random_pose, ransac_kabsch
 from masif_graph.p4.eval_af3 import Rec, build_encoder
