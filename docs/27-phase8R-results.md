@@ -84,14 +84,18 @@ Three further probes rule out the obvious candidates:
 
 * **Can it fit at all?** 20 complexes, evaluated on *the same* 20, 60 epochs, matching loss only (no
   distogram, dustbin or chain term): loss plateaus at **6.95**, against log(1265) = **7.14** - the
-  uniform value - and spatial error stays at **21.4 A**. It cannot overfit twenty complexes it has
-  seen sixty times. So this is neither a data-volume nor a generalisation problem.
+  uniform value - and spatial error stays at **21.4 A**. At the default size it cannot overfit twenty
+  complexes it has seen sixty times, so this is neither a data-volume nor a generalisation problem.
 * **Is the bilinear form the bottleneck?** Ranking candidates with the trained MLP distogram head
   instead of `z^T T z` is **worse** (26.7 A vs 23.6 A). Swapping the scorer does not help, so the
   information is not present in the embeddings for either scorer to use.
-* **Capacity** (4x larger: d 256, d_out 128, 6 layers, same 20 complexes) does begin to fit - loss
-  7.36 -> 6.57 over 33 epochs - but only slowly, and this is memorisation of 20 complexes, not a
-  demonstration that the task generalises.
+* **Capacity is the one lever that moved.** A 4x larger model (d 256, d_out 128, 6 layers) on the
+  same 20 complexes reached loss **6.18** (from 7.36; uniform is 7.14) and **12.4 A** train-set
+  spatial error over 60 epochs, against 21.4 A for the default size. So the earlier statement must
+  be narrowed: **the default-size model cannot fit 20 complexes; a 4x model partly can.**
+  Caveats that keep this from being good news yet - it is *memorisation of 20 complexes*, it still
+  misses the 5 A gate by 2.5x, it needed 60 epochs to get there, and generalisation was never
+  tested.
 
 The distogram head itself trained fine (binned MAE 5.03 -> 3.89 A, contact recall 0.20 -> 0.38 after
 the class-balance fix), but that reflects the easy separation between random far pairs and true
@@ -110,6 +114,15 @@ The evidence supports that specifically, rather than as a retreat:
   chemistry elaboration, Stage-A's diagnosis, Stage R's redesign) have failed;
 * Stage 3's bar is already known and does not need correspondences: BSA-only AUROC **0.827** /
   AP 0.474 (`docs/25` §7).
+
+**The one alternative worth pricing before taking the fallback** is capacity. It is the only lever
+that moved the metric (21.4 -> 12.4 A on memorised data), and it was never tried at scale. A fair
+test is a 4x encoder trained on the full corpus with the R2/R3 objective and the dustbin term
+*removed* (it is the suspected cause of the flat scores). That is one training run, ~CHF 10, and it
+would settle whether atom-level correspondence is unreachable or merely under-parameterised. My
+recommendation is to run that single experiment before committing to the fallback - but the fallback
+remains the default if it fails, and it does not block Stage B/C, which need only interface-level
+signal.
 
 **Keep the Phase-6C/7 encoder.** No Stage-R checkpoint should be adopted for anything.
 
