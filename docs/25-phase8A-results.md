@@ -156,6 +156,49 @@ So the failure has **two** components, and the larger one is fixable by construc
 **~6–7 core-hours per 40k-partner screen**. Stage 2 is affordable; on the current Stage-1 scores it
 is not accurate.
 
+### 4.3 Why Stage 1 fails: the scores are not **spatially localised**
+
+Measured on 60 complexes with the Stage-B seed-0 checkpoint, 4,781 true interface query atoms,
+mean partner-chain size 854 atoms.
+
+**Does it solve its own training task?** Given a true interface atom as the query — exactly the
+condition `info_nce_complex` trains on, and exactly the deployment mode where a query patch is
+specified — the true partner ranks:
+
+| top-1 | top-5 | top-10 | top-50 | median rank |
+|---|---|---|---|---|
+| **0.022** | 0.082 | 0.131 | 0.348 | **109 of 854** |
+
+Chance top-1 is 0.0012, so this is ~18× chance: real signal, nowhere near an assignment.
+
+**Where does it point?** Distance from the model's top-1 predicted partner to the nearest true
+partner:
+
+| p10 | p25 | **p50** | p75 | p90 |
+|---|---|---|---|---|
+| 6.2 Å | 11.7 Å | **19.4 Å** | 28.7 Å | 37.5 Å |
+
+Only **7.1%** land within 5 Å; **48% are beyond 20 Å**. Best-of-top-10 is better (median 7.5 Å,
+32.7% within 5 Å), so the right region is *somewhere* in the top 10 about a third of the time — but
+the top pick is usually on a different part of the partner surface entirely.
+
+**This is not "right neighbourhood, wrong atom".** That distinction matters, because a
+correspondence 3–5 Å off is harmless to RANSAC (inlier threshold 6 Å). With ~7% of correspondences
+spatially right and half of them catastrophically wrong, any large mutually-consistent *wrong*
+configuration outvotes the correct minority — which is exactly the observed 21–23 Å iRMSD.
+
+**Mechanistic reading.** The score `z_i^T T z_j` says "these two atoms sit in complementary local
+environments", and complementary local environments recur all over a protein surface. The encoder is
+strictly local and SE(3)-invariant by construction — it reads only distances and cosines, with vv
+edges ≤4 Å, va edges ≤5 Å and 4 message-passing layers, so a receptive field of roughly 15–20 Å,
+about one MaSIF patch. Two chemically similar patches 40 Å apart are therefore **provably**
+indistinguishable to it. Nothing in the representation or the loss encodes *where on the surface* an
+atom is.
+
+Multi-positive contamination is a real but **minor** contributor: an interface atom has a mean of
+1.8 true partners (median 1), and single-label cross-entropy treats the other 0.8 as negatives. Worth
+fixing, not the main cause.
+
 ## 5. A0 — apo-prediction method benchmark (D8-12 evidence)
 
 ### 5.1 AFDB coverage — the number Option A lives or dies on
