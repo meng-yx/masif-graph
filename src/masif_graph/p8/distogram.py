@@ -69,6 +69,17 @@ class DistogramHead(nn.Module):
         return 0.5 * (self.net(self._feat(zi, zj, s)) + self.net(self._feat(zj, zi, s)))
 
 
+def n_negatives(n_pos, neg_per_pos=4, max_neg=4096, min_neg=256):
+    """How many random pairs to draw, PROPORTIONAL to the number of true contacts.
+
+    A fixed count (the first attempt used 2048) makes the no-contact class ~10x the contact class,
+    and a 1-epoch GPU probe showed the head simply learning the prior: distogram accuracy 0.778 with
+    **contact recall 0.032**. Proportional sampling plus the class weighting in `distogram_loss`
+    keeps the two aggregate contributions comparable.
+    """
+    return int(min(max_neg, max(min_neg, neg_per_pos * max(n_pos, 1))))
+
+
 def sample_pairs(n1, n2, pos, n_neg, device, seed=0):
     """All true contacts + `n_neg` random non-contact pairs.
 
@@ -86,14 +97,27 @@ def sample_pairs(n1, n2, pos, n_neg, device, seed=0):
     return a, b
 
 
-def distogram_loss(head, comp, z1, z2, c1, c2, pos, n_neg=2048, seed=0):
-    """Cross-entropy of predicted bins against the true (binned) inter-atom distances."""
+def distogram_loss(head, comp, z1, z2, c1, c2, pos, n_neg=None, seed=0, neg_per_pos=4):
+    """Cross-entropy of predicted bins against the true (binned) inter-atom distances.
+
+    Class-balanced: the "no contact" bin is down-weighted so that contact and non-contact bins
+    contribute comparably in aggregate. Without this the head learns the prior (measured: accuracy
+    0.778, contact recall 0.032).
+    """
+    n_pos = int(pos.shape[0]) if pos is not None else 0
+    if n_neg is None:
+        n_neg = n_negatives(n_pos, neg_per_pos=neg_per_pos)
     a, b = sample_pairs(z1.shape[0], z2.shape[0], pos, n_neg, z1.device, seed)
     d = (c1[a] - c2[b]).norm(dim=1)
     s = (z1[a] @ comp.T * z2[b]).sum(1)
     logits = head(z1[a], z2[b], s)
     tgt = bin_distances(d)
-    loss = F.cross_entropy(logits, tgt)
+    w = torch.ones(head.n_bins, device=logits.device, dtype=logits.dtype)
+    n_far = int((tgt == NO_CONTACT_BIN).sum())
+    n_near = int(len(tgt)) - n_far
+    if n_far > 0 and n_near > 0:
+        w[NO_CONTACT_BIN] = max(n_near / n_far, 1e-3)
+    loss = F.cross_entropy(logits, tgt, weight=w)
     with torch.no_grad():
         pred = logits.argmax(1)
         ctr = bin_centres(d.device, d.dtype)

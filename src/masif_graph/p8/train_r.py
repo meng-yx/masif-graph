@@ -205,8 +205,8 @@ def run(args):
                 P = torch.as_tensor(pos, dtype=torch.long, device=dev)
                 la, _ = soft_target_infonce(z1, z2, P, c1, c2, scorer, sigma=args.sigma,
                                             n_neg_query=args.n_neg_query, seed=args.seed + ep)
-                ld, sd = distogram_loss(head, comp, z1, z2, c1, c2, pos, n_neg=args.n_neg_pairs,
-                                        seed=args.seed + ep)
+                ld, sd = distogram_loss(head, comp, z1, z2, c1, c2, pos, n_neg=None,
+                                        neg_per_pos=args.neg_per_pos, seed=args.seed + ep)
                 loss = loss + args.w_atom * la + args.w_disto * ld
                 for k, v in sd.items():
                     st_acc.setdefault(k, []).append(v)
@@ -281,7 +281,8 @@ def main():
     ap.add_argument("--w-disto", type=float, default=1.0)
     ap.add_argument("--w-chain", type=float, default=0.5)
     ap.add_argument("--n-neg-query", type=int, default=256, help="dustbin queries per chain")
-    ap.add_argument("--n-neg-pairs", type=int, default=2048, help="random pairs for the distogram")
+    ap.add_argument("--neg-per-pos", type=int, default=4,
+                    help="random non-contact pairs per true contact (class balance)")
     ap.add_argument("--vicreg-var", type=float, default=2.0)
     ap.add_argument("--vicreg-cov", type=float, default=0.04)
     ap.add_argument("--grad-clip", type=float, default=1.0)
